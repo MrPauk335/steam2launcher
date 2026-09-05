@@ -1,0 +1,118 @@
+﻿<Window x:Class="Steam2Launcher.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:local="clr-namespace:Steam2Launcher"
+        mc:Ignorable="d"
+        Title="Steam2 Launcher" Height="640" Width="940"
+        WindowStartupLocation="CenterScreen"
+        MinWidth="760" MinHeight="480"
+        ResizeMode="CanResize"
+        Background="{DynamicResource BgBrush}">
+    <Window.Resources>
+        <Style TargetType="Button">
+            <Setter Property="Background" Value="{DynamicResource AccentBrush}"/>
+            <Setter Property="Foreground" Value="White"/>
+            <Setter Property="Padding" Value="12,4"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="FontSize" Value="13"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Style.Triggers>
+                <Trigger Property="IsMouseOver" Value="True">
+                    <Setter Property="Opacity" Value="0.9"/>
+                </Trigger>
+            </Style.Triggers>
+        </Style>
+    </Window.Resources>
+    <Grid Margin="16">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <!-- Top bar -->
+        <DockPanel Grid.Row="0" Margin="0,0,0,12">
+            <TextBlock x:Name="TxtStatus" Foreground="{DynamicResource SubFgBrush}"
+                       FontSize="13" VerticalAlignment="Center"/>
+            <Button x:Name="BtnTheme" Content="Тема: Тёмная" DockPanel.Dock="Right"
+                    Width="150" Height="30" Margin="8,0,0,0" Click="BtnTheme_Click"/>
+            <Button x:Name="BtnRescan" Content="Обновить" DockPanel.Dock="Right"
+                    Width="90" Height="30" Margin="0,0,8,0" Click="BtnRescan_Click"/>
+        </DockPanel>
+
+        <!-- Games list -->
+        <DataGrid Grid.Row="1" x:Name="GamesGrid"
+                  AutoGenerateColumns="False"
+                  IsReadOnly="True"
+                  SelectionMode="Single"
+                  CanUserAddRows="False"
+                  HeadersVisibility="Column"
+                  Background="{DynamicResource PanelBrush}"
+                  Foreground="{DynamicResource FgBrush}"
+                  BorderBrush="{DynamicResource BorderBrush}"
+                  BorderThickness="1"
+                  RowHeight="34"
+                  FontSize="13"
+                  ColumnHeaderHeight="34"
+                  GridLinesVisibility="Horizontal"
+                  MouseDoubleClick="GamesGrid_MouseDoubleClick">
+            <DataGrid.Resources>
+                <Style TargetType="DataGridColumnHeader">
+                    <Setter Property="Background" Value="{DynamicResource PanelBrush}"/>
+                    <Setter Property="Foreground" Value="{DynamicResource SubFgBrush}"/>
+                    <Setter Property="FontWeight" Value="SemiBold"/>
+                    <Setter Property="Padding" Value="8,0,8,0"/>
+                </Style>
+                <Style TargetType="DataGridRow">
+                    <Setter Property="Background" Value="Transparent"/>
+                    <Style.Triggers>
+                        <Trigger Property="IsSelected" Value="True">
+                            <Setter Property="Background" Value="{DynamicResource AccentBrush}"/>
+                            <Setter Property="Foreground" Value="White"/>
+                        </Trigger>
+                    </Style.Triggers>
+                </Style>
+            </DataGrid.Resources>
+            <DataGrid.Columns>
+                <DataGridTextColumn Header="Игра" Binding="{Binding Name}" Width="2*"/>
+                <DataGridTextColumn Header="Описание" Binding="{Binding Description}" Width="3*"/>
+                <DataGridTextColumn Header="Статус" Binding="{Binding StatusText}" Width="1*"/>
+            </DataGrid.Columns>
+        </DataGrid>
+
+        <!-- Install folder + actions -->
+        <DockPanel Grid.Row="2" Margin="0,12,0,0" LastChildFill="True">
+            <Button x:Name="BtnEdit" Content="Свойства" DockPanel.Dock="Right"
+                    Width="90" Height="34" Margin="8,0,0,0" Click="BtnEdit_Click"/>
+            <Button x:Name="BtnLaunch" Content="Запустить" DockPanel.Dock="Right"
+                    Width="90" Height="34" Margin="8,0,0,0" Click="BtnLaunch_Click"/>
+            <Button x:Name="BtnDownload" Content="Скачать" DockPanel.Dock="Right"
+                    Width="90" Height="34" Margin="8,0,0,0" Click="BtnDownload_Click"/>
+            <TextBlock DockPanel.Dock="Left" Text="Папка:" VerticalAlignment="Center"
+                       Foreground="{DynamicResource SubFgBrush}" Margin="0,0,8,0"/>
+            <Button x:Name="BtnBrowse" Content="Обзор" DockPanel.Dock="Right"
+                    Width="80" Height="30" Margin="8,0,8,0" VerticalAlignment="Center" Click="BtnBrowse_Click"/>
+            <TextBox x:Name="TxtInstallRoot" Height="30" IsReadOnly="True"
+                     VerticalContentAlignment="Center" Padding="6,0"
+                     Background="{DynamicResource PanelBrush}"
+                     Foreground="{DynamicResource FgBrush}"
+                     BorderBrush="{DynamicResource BorderBrush}"/>
+        </DockPanel>
+
+        <!-- Progress row -->
+        <Grid Grid.Row="3" Margin="0,8,0,0">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="*"/>
+            </Grid.ColumnDefinitions>
+            <ProgressBar x:Name="Progress" Height="22" Minimum="0" Maximum="100"
+                         Visibility="Collapsed" VerticalAlignment="Center"/>
+            <TextBlock Grid.Column="1" x:Name="TxtProgress" Foreground="{DynamicResource SubFgBrush}"
+                       VerticalAlignment="Center" FontSize="12" Margin="10,0,0,0"/>
+        </Grid>
+    </Grid>
+</Window>

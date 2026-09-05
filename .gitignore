@@ -1,0 +1,8 @@
+bin/
+obj/
+Games/
+games.json
+post.txt
+*.user
+*.suo
+.vs/

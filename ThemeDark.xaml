@@ -1,0 +1,12 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                    xmlns:sys="clr-namespace:System;assembly=mscorlib">
+    <sys:String x:Key="ThemeName">Dark</sys:String>
+    <SolidColorBrush x:Key="BgBrush" Color="#17181C"/>
+    <SolidColorBrush x:Key="PanelBrush" Color="#1F2127"/>
+    <SolidColorBrush x:Key="FgBrush" Color="#E8EAED"/>
+    <SolidColorBrush x:Key="SubFgBrush" Color="#9AA0A6"/>
+    <SolidColorBrush x:Key="AccentBrush" Color="#3B82F6"/>
+    <SolidColorBrush x:Key="BorderBrush" Color="#2E3138"/>
+    <SolidColorBrush x:Key="SuccessBrush" Color="#7CCB8A"/>
+</ResourceDictionary>
