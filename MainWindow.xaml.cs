@@ -1,6 +1,7 @@
 ﻿using System.Collections.ObjectModel;
 using System.Diagnostics;
 using System.IO;
+using System.Net.Http;
 using System.Windows;
 using System.Windows.Input;
 using MessageBox = System.Windows.MessageBox;
@@ -9,11 +10,17 @@ namespace Steam2Launcher;
 
 public partial class MainWindow : Window
 {
+    public const string CurrentVersion = "v1.2.0";
+    public const string UpdateRepo = "MrPauk335/steam2launcher";
+
     private readonly Downloader _downloader = new();
     private readonly ObservableCollection<GameItem> _games = new();
     private CancellationTokenSource? _cts;
     private string _installRoot = "";
     private string _theme = "Dark";
+    public string? LatestVersion { get; private set; }
+    public string? LatestUrl { get; private set; }
+    public string? LatestAssetUrl { get; private set; }
 
     public MainWindow()
     {
@@ -21,6 +28,81 @@ public partial class MainWindow : Window
         GamesGrid.ItemsSource = _games;
         LoadSettings();
         RescanPost();
+        _ = CheckForUpdatesAsync();
+    }
+
+    private async Task CheckForUpdatesAsync()
+    {
+        try
+        {
+            var url = $"https://api.github.com/repos/{UpdateRepo}/releases/latest";
+            using var req = new HttpRequestMessage(HttpMethod.Get, url);
+            req.Headers.UserAgent.ParseAdd("Steam2Launcher/" + CurrentVersion);
+            req.Headers.Accept.ParseAdd("application/vnd.github+json");
+            using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(8) };
+            using var resp = await http.SendAsync(req);
+            if (!resp.IsSuccessStatusCode) return;
+            var json = await resp.Content.ReadAsStringAsync();
+            using var doc = System.Text.Json.JsonDocument.Parse(json);
+            var tag = doc.RootElement.GetProperty("tag_name").GetString() ?? "";
+            var htmlUrl = doc.RootElement.GetProperty("html_url").GetString() ?? "";
+            string? assetUrl = null;
+            if (doc.RootElement.TryGetProperty("assets", out var assets))
+            {
+                foreach (var a in assets.EnumerateArray())
+                {
+                    var name = a.GetProperty("name").GetString() ?? "";
+                    if (name.EndsWith(".zip", StringComparison.OrdinalIgnoreCase))
+                    {
+                        assetUrl = a.GetProperty("browser_download_url").GetString();
+                        break;
+                    }
+                }
+            }
+            if (string.IsNullOrEmpty(tag) || string.IsNullOrEmpty(htmlUrl)) return;
+            if (IsNewer(tag, CurrentVersion))
+            {
+                LatestVersion = tag;
+                LatestUrl = htmlUrl;
+                LatestAssetUrl = assetUrl;
+                Dispatcher.Invoke(() => ShowUpdateBanner(tag, htmlUrl));
+            }
+        }
+        catch { /* ignore: no internet / rate limit / etc. */ }
+    }
+
+    private static bool IsNewer(string remote, string local)
+    {
+        // strip leading 'v', compare tuples
+        int[] Parse(string s) => s.TrimStart('v', 'V').Split('.', StringSplitOptions.RemoveEmptyEntries)
+            .Select(p => int.TryParse(p, out var n) ? n : 0).ToArray();
+        var a = Parse(remote); var b = Parse(local);
+        for (int i = 0; i < Math.Max(a.Length, b.Length); i++)
+        {
+            var av = i < a.Length ? a[i] : 0;
+            var bv = i < b.Length ? b[i] : 0;
+            if (av > bv) return true;
+            if (av < bv) return false;
+        }
+        return false;
+    }
+
+    private void ShowUpdateBanner(string tag, string url)
+    {
+        TxtUpdate.Text = $"🔔 Доступно обновление {tag} (у тебя {CurrentVersion})";
+        TxtUpdate.Tag = url;
+        TxtUpdate.Visibility = Visibility.Visible;
+        TxtUpdate.Cursor = System.Windows.Input.Cursors.Hand;
+        TxtUpdate.MouseLeftButtonUp -= TxtUpdate_Click;
+        TxtUpdate.MouseLeftButtonUp += TxtUpdate_Click;
+    }
+
+    private void TxtUpdate_Click(object sender, System.Windows.Input.MouseButtonEventArgs e)
+    {
+        var url = (sender as System.Windows.Controls.TextBlock)?.Tag as string;
+        if (string.IsNullOrEmpty(url)) return;
+        try { System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo { FileName = url, UseShellExecute = true }); }
+        catch { }
     }
 
     private void LoadSettings()

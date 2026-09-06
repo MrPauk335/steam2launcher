@@ -29,13 +29,14 @@
     <Grid Margin="16">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
             <RowDefinition Height="*"/>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
 
         <!-- Top bar -->
-        <DockPanel Grid.Row="0" Margin="0,0,0,12">
+        <DockPanel Grid.Row="0" Margin="0,0,0,4">
             <TextBlock x:Name="TxtStatus" Foreground="{DynamicResource SubFgBrush}"
                        FontSize="13" VerticalAlignment="Center"/>
             <Button x:Name="BtnTheme" Content="Тема: Тёмная" DockPanel.Dock="Right"
@@ -43,9 +44,14 @@
             <Button x:Name="BtnRescan" Content="Обновить" DockPanel.Dock="Right"
                     Width="90" Height="30" Margin="0,0,8,0" Click="BtnRescan_Click"/>
         </DockPanel>
+        <TextBlock Grid.Row="1" x:Name="TxtUpdate" Visibility="Collapsed"
+                   HorizontalAlignment="Stretch" Margin="0,0,0,8"
+                   Padding="10,6" Background="#1f2937" Foreground="#facc15"
+                   FontSize="13" FontWeight="SemiBold"
+                   TextAlignment="Center"/>
 
         <!-- Games list -->
-        <DataGrid Grid.Row="1" x:Name="GamesGrid"
+        <DataGrid Grid.Row="2" x:Name="GamesGrid"
                   AutoGenerateColumns="False"
                   IsReadOnly="True"
                   SelectionMode="Single"
@@ -85,7 +91,7 @@
         </DataGrid>
 
         <!-- Install folder + actions -->
-        <DockPanel Grid.Row="2" Margin="0,12,0,0" LastChildFill="True">
+        <DockPanel Grid.Row="3" Margin="0,12,0,0" LastChildFill="True">
             <Button x:Name="BtnEdit" Content="Свойства" DockPanel.Dock="Right"
                     Width="90" Height="34" Margin="8,0,0,0" Click="BtnEdit_Click"/>
             <Button x:Name="BtnLaunch" Content="Запустить" DockPanel.Dock="Right"
@@ -104,7 +110,7 @@
         </DockPanel>
 
         <!-- Progress row -->
-        <Grid Grid.Row="3" Margin="0,8,0,0">
+        <Grid Grid.Row="4" Margin="0,8,0,0">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="*"/>
                 <ColumnDefinition Width="*"/>
