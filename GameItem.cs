@@ -9,6 +9,8 @@ public class GameItem : INotifyPropertyChanged
     private string _name;
     private string _description;
     private string _url;
+    private string _directUrl;
+    private string _launchArgs;
     private string _installDir;
     private string _exePath;
     private string _statusText;
@@ -24,6 +26,8 @@ public class GameItem : INotifyPropertyChanged
         _name = name;
         _description = description;
         _url = url;
+        _directUrl = "";
+        _launchArgs = "";
         _installDir = installDir;
         _exePath = exePath;
         _isInstalled = installed;
@@ -34,6 +38,8 @@ public class GameItem : INotifyPropertyChanged
     public string Name { get => _name; set { _name = value; OnProp(); } }
     public string Description { get => _description; set { _description = value; OnProp(); } }
     public string Url { get => _url; set { _url = value; OnProp(); } }
+    public string DirectUrl { get => _directUrl; set { _directUrl = value; OnProp(); } }
+    public string LaunchArgs { get => _launchArgs; set { _launchArgs = value; OnProp(); } }
 
     public string InstallDir
     {
@@ -110,6 +116,52 @@ public class GameItem : INotifyPropertyChanged
         var chosen = best.path;
         var chosenRel = Path.GetRelativePath(installRoot, chosen);
         ExePath = chosenRel.StartsWith("..") ? chosen : chosenRel;
+
+        AutoDetectLaunchArgs(installRoot);
+    }
+
+    /// <summary>
+    /// Source-engine style builds: an engine exe (hl2.exe/portal2.exe/...) needs the game
+    /// module dir passed as -game &lt;mod&gt;. Finds a folder containing gameinfo.txt inside
+    /// the install and, if the exe is an engine, fills LaunchArgs.
+    /// </summary>
+    public void AutoDetectLaunchArgs(string installRoot)
+    {
+        var full = FullInstallPath(installRoot);
+        if (!Directory.Exists(full)) return;
+        var exeName = Path.GetFileName(ExePath.Replace('\\', '/')).ToLowerInvariant();
+        if (exeName != "hl2.exe" && exeName != "hl.exe" && exeName != "portal.exe"
+            && exeName != "portal2.exe" && exeName != "svencoop.exe" && exeName != "steamapps.exe"
+            && exeName != "clientserver.exe" && exeName != "left4dead2.exe" && exeName != "left4dead.exe")
+            return;
+
+        var mod = FindSourceMod(full);
+        if (mod == null) return;
+        LaunchArgs = "-game " + mod;
+    }
+
+    /// <summary>Finds the gameinfo.txt closest to the install root and returns its parent dir name, or null.</summary>
+    private static string? FindSourceMod(string installRoot)
+    {
+        string? best = null;
+        var bestDepth = int.MaxValue;
+        try
+        {
+            foreach (var f in Directory.EnumerateFiles(installRoot, "gameinfo.txt", SearchOption.AllDirectories))
+            {
+                var rel = Path.GetRelativePath(installRoot, f);
+                var depth = rel.Count(c => c == '\\' || c == '/');
+                if (depth >= bestDepth || depth > 4) continue;
+                var dir = Path.GetDirectoryName(f);
+                if (dir == null || string.Equals(dir.TrimEnd('\\', '/'), installRoot.TrimEnd('\\', '/'), StringComparison.OrdinalIgnoreCase)) continue;
+                var folder = Path.GetFileName(dir);
+                if (string.IsNullOrWhiteSpace(folder) || folder.Length > 32) continue;
+                best = folder;
+                bestDepth = depth;
+            }
+        }
+        catch { }
+        return best;
     }
 
     public string FullInstallPath(string installRoot)

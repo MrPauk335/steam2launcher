@@ -26,6 +26,7 @@ public partial class MainWindow : Window
     private void LoadSettings()
     {
         var settings = Storage.LoadSettings();
+        SeedKnownCredentials(settings);
 
         // Data file candidates: games.json (preferred) then post.txt, at source folder / exe folder / cwd
         var root = Path.GetFullPath(Path.Combine(AppInfo.BaseDir, "..", "..", "..", ".."));
@@ -60,6 +61,27 @@ public partial class MainWindow : Window
         TxtInstallRoot.Text = _installRoot;
         TxtStatus.Text = $"Файл: {Path.GetFileName(AppInfo.PostPath)}";
         ApplyTheme(string.IsNullOrWhiteSpace(settings.Theme) ? "Dark" : settings.Theme);
+    }
+
+    private static void SeedKnownCredentials(AppSettings settings)
+    {
+        // Known leak-hosting creds so hosted builds download without prompting.
+        // Always overwrites so stale/wrong values never get stuck.
+        var known = new (string Host, string Creds)[]
+        {
+            ("files.kotle.uk", "gaben:gaben"),
+            ("kotle.uk", "gaben:gaben")
+        };
+        var changed = false;
+        foreach (var (host, creds) in known)
+        {
+            if (!settings.HostCredentials.TryGetValue(host, out var cur) || cur != creds)
+            {
+                settings.HostCredentials[host] = creds;
+                changed = true;
+            }
+        }
+        if (changed) Storage.SaveSettings(settings);
     }
 
     private void ApplyTheme(string name)
@@ -103,8 +125,24 @@ public partial class MainWindow : Window
             var s = saved.FirstOrDefault(x => x.Url == e.Url);
             var installDir = s?.InstallDir ?? "";
             var installed = GameInstalledLocally(e.Name, installDir);
-            var g = new GameItem(e.Name, e.Description, e.Url, installDir, s?.ExePath ?? "", installed);
-            if (installed && string.IsNullOrEmpty(g.ExePath)) g.AutoFindExe(_installRoot);
+            var g = new GameItem(e.Name, e.Description, e.Url, installDir, s?.ExePath ?? "", installed)
+            {
+                DirectUrl = string.IsNullOrWhiteSpace(s?.DirectUrl) ? e.DirectUrl : s.DirectUrl,
+                LaunchArgs = string.IsNullOrWhiteSpace(s?.LaunchArgs) ? e.LaunchArgs : s.LaunchArgs
+            };
+            if (installed && string.IsNullOrEmpty(g.ExePath))
+            {
+                // Server-recommended exe (relative to install dir) if it exists, else auto-detect
+                var suggested = e.Exe;
+                if (!string.IsNullOrWhiteSpace(suggested))
+                {
+                    var suggestedFull = Path.IsPathRooted(suggested) ? suggested : Path.Combine(_installRoot, suggested);
+                    if (File.Exists(suggestedFull)) g.ExePath = suggested;
+                    else if (File.Exists(Path.Combine(FullInstallPath(g), suggested))) g.ExePath = suggested;
+                }
+                if (string.IsNullOrEmpty(g.ExePath)) g.AutoFindExe(_installRoot);
+                if (string.IsNullOrEmpty(g.LaunchArgs)) g.AutoDetectLaunchArgs(_installRoot);
+            }
             _games.Add(g);
         }
 
@@ -155,6 +193,8 @@ public partial class MainWindow : Window
         {
             Name = g.Name,
             Url = g.Url,
+            DirectUrl = g.DirectUrl,
+            LaunchArgs = g.LaunchArgs,
             InstallDir = g.InstallDir,
             ExePath = g.ExePath
         }).ToList();
@@ -191,6 +231,67 @@ public partial class MainWindow : Window
     }
 
     private GameItem? Selected => GamesGrid.SelectedItem as GameItem;
+
+    // ---------- Авто-установка SmartSteamEmu ----------
+
+    private static bool IsEmulator(GameItem g) =>
+        g.Name.Contains("SmartSteamEmu", StringComparison.OrdinalIgnoreCase)
+        || g.Url.Contains("SmartSteamEmu", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// После установки любой игры доматывает SmartSteamEmu (если лаунчер его скачал)
+    /// в папки всех установленных игр, чтобы эмулятор работал без ручных шагов.
+    /// Папка эмулятора ищется как "SmartSteamEmu/SmartSteamEmu" внутри его установки.
+    /// </summary>
+    private void AfterInstall(GameItem justInstalled)
+    {
+        var emu = _games.FirstOrDefault(IsEmulator);
+        if (emu == null) return;
+        var emuDir = FullInstallPath(emu);
+        if (!Directory.Exists(emuDir)) return;
+
+        var payload = Path.Combine(emuDir, "SmartSteamEmu", "SmartSteamEmu");
+        if (!Directory.Exists(payload)) payload = emuDir;
+
+        foreach (var g in _games)
+        {
+            if (g == emu) continue;
+            var gDir = FullInstallPath(g);
+            if (!Directory.Exists(gDir)) continue;
+
+            var target = gDir;
+            if (!string.IsNullOrEmpty(g.ExePath))
+            {
+                var exeDir = Path.GetDirectoryName(FullExePath(g));
+                if (exeDir != null && Directory.Exists(exeDir)) target = exeDir;
+            }
+            CopyPayload(payload, target);
+        }
+
+        // Сам эмулятор удобнее запускать через SSELauncher.exe (графический лаунчер)
+        if (ReferenceEquals(justInstalled, emu))
+        {
+            var sse = Path.Combine(emuDir, "SSELauncher.exe");
+            if (File.Exists(sse)) emu.ExePath = sse;
+        }
+    }
+
+    private static void CopyPayload(string payload, string targetDir)
+    {
+        foreach (var f in Directory.EnumerateFiles(payload))
+            File.Copy(f, Path.Combine(targetDir, Path.GetFileName(f)), true);
+        foreach (var d in Directory.EnumerateDirectories(payload))
+            CopyDirectory(d, Path.Combine(targetDir, Path.GetFileName(d)));
+    }
+
+    private static void CopyDirectory(string srcDir, string dstDir)
+    {
+        Directory.CreateDirectory(dstDir);
+        foreach (var f in Directory.EnumerateFiles(srcDir))
+            File.Copy(f, Path.Combine(dstDir, Path.GetFileName(f)), true);
+        foreach (var d in Directory.EnumerateDirectories(srcDir))
+            CopyDirectory(d, Path.Combine(dstDir, Path.GetFileName(d)));
+    }
 
     /// <summary>Handles HTTP 401: returns saved or user-entered "user:pass", or null if cancelled.</summary>
     private Task<string?> PromptCredentials(Downloader downloader, Uri uri, int tryIndex)
@@ -245,7 +346,10 @@ public partial class MainWindow : Window
 
         try
         {
-            var (directUrl, fileName) = await _downloader.ResolveAsync(g.Url, ct);
+            // Direct link already resolved on the server -> skip network resolution
+            var (directUrl, fileName) = !string.IsNullOrWhiteSpace(g.DirectUrl)
+                ? (g.DirectUrl, Downloader.FileNameFromUrl(g.DirectUrl))
+                : await _downloader.ResolveAsync(g.Url, ct);
             if (string.IsNullOrEmpty(fileName)) fileName = GameEntry.Sanitize(g.Name) + ".zip";
             var downloadPath = Path.Combine(Path.GetTempPath(), "steam2dl_" + Guid.NewGuid().ToString("N")[..8]
                 + "_" + GameEntry.Sanitize(fileName));
@@ -289,6 +393,8 @@ public partial class MainWindow : Window
             if (g.InstallDir.StartsWith("..")) g.InstallDir = dest;
             g.IsInstalled = true;
             g.AutoFindExe(_installRoot);
+            if (string.IsNullOrEmpty(g.LaunchArgs)) g.AutoDetectLaunchArgs(_installRoot);
+            AfterInstall(g);
             SaveGames();
             TxtStatus.Text = $"Игра «{g.Name}» установлена в {dest}";
             Progress.Value = 100;
@@ -358,8 +464,10 @@ public partial class MainWindow : Window
                 WorkingDirectory = Path.GetDirectoryName(fullExe),
                 UseShellExecute = true
             };
+            if (!string.IsNullOrWhiteSpace(g.LaunchArgs))
+                psi.Arguments = g.LaunchArgs;
             Process.Start(psi);
-            TxtStatus.Text = $"Запущено: {g.Name}";
+            TxtStatus.Text = $"Запущено: {g.Name}" + (string.IsNullOrWhiteSpace(g.LaunchArgs) ? "" : " (" + g.LaunchArgs + ")");
         }
         catch (Exception ex)
         {

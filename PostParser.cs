@@ -43,6 +43,9 @@ public static class PostParser
             {
                 Name = string.IsNullOrWhiteSpace(e.Name) ? Downloader.FileNameFromUrl(e.Url) : e.Name.Trim(),
                 Description = (e.Description ?? "").Trim(),
+                DirectUrl = (e.DirectUrl ?? "").Trim(),
+                Exe = (e.Exe ?? "").Trim(),
+                LaunchArgs = (e.LaunchArgs ?? "").Trim(),
                 Url = e.Url.Trim(),
                 Status = GameStatus.NotDownloaded
             });

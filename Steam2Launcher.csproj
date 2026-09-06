@@ -7,11 +7,15 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <UseWPF>true</UseWPF>
     <UseWindowsForms>true</UseWindowsForms>
+    <NoWarn>$(NoWarn);NU1902</NoWarn>
   </PropertyGroup>
 
+  <ItemGroup>
+    <PackageReference Include="SharpCompress" Version="0.44.0" />
+  </ItemGroup>
+
   <Target Name="CopyPostTxt" AfterTargets="Build">
-    <Copy SourceFiles="..\post.txt" DestinationFolder="$(OutputPath)"
-          Condition="Exists('..\post.txt')" SkipUnchangedFiles="true"/>
+    <Copy SourceFiles="..\post.txt" DestinationFolder="$(OutputPath)" Condition="Exists('..\post.txt')" SkipUnchangedFiles="true" />
   </Target>
 
 </Project>

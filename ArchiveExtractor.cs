@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.IO;
 using System.IO.Compression;
 using System.Text;
+using SharpCompress.Archives;
 
 namespace Steam2Launcher;
 
@@ -28,35 +29,25 @@ public static class ArchiveExtractor
 
         if (ext == ".zip")
         {
-            var destFull = Path.GetFullPath(destDir);
-            await Task.Run(() =>
-            {
-                using var zip = ZipFile.OpenRead(archivePath);
-                var total = zip.Entries.Count;
-                var i = 0;
-                foreach (var e in zip.Entries)
-                {
-                    ct.ThrowIfCancellationRequested();
-                    i++;
-                    progress?.Report($"Распаковка: {i}/{total} {e.FullName}");
-                    var target = Path.GetFullPath(Path.Combine(destDir, e.FullName));
-                    if (!target.StartsWith(destFull, StringComparison.OrdinalIgnoreCase))
-                        continue;
-                    var dir = Path.GetDirectoryName(target);
-                    if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
-                    if (string.IsNullOrEmpty(e.Name)) continue;
-                    using var src = e.Open();
-                    using var dst = new FileStream(target, FileMode.Create, FileAccess.Write, FileShare.None);
-                    src.CopyTo(dst);
-                }
-            }, ct);
+            await ExtractZipManagedAsync(archivePath, destDir, progress, ct);
             return;
         }
 
-        // 7z / rar => try external 7z
+        // 7z / rar => managed SharpCompress first, fall back to external 7-Zip
+        try
+        {
+            await ExtractManagedAsync(archivePath, destDir, progress, ct);
+            return;
+        }
+        catch (Exception ex) when (ex is SharpCompress.Common.ArchiveException
+                                   || ex is SharpCompress.Common.InvalidFormatException)
+        {
+            // fall through to 7-Zip
+        }
+
         var sevenZip = FindSevenZip();
         if (sevenZip == null)
-            throw new Exception("Для архивов .7z/.rar нужен установленный 7-Zip (положите 7z.exe в папку лаунчера или установите 7-Zip).");
+            throw new Exception("Не удалось распаковать архив. Для .7z/.rar можно положить 7z.exe в папку лаунчера или установить 7-Zip.");
 
         var psi = new ProcessStartInfo
         {
@@ -78,6 +69,57 @@ public static class ArchiveExtractor
         var msg = await outTask + await errTask;
         if (proc.ExitCode != 0)
             throw new Exception("7-Zip ошибка: " + msg);
+    }
+
+    private static async Task ExtractZipManagedAsync(string archivePath, string destDir,
+        IProgress<string> progress, CancellationToken ct)
+    {
+        var destFull = Path.GetFullPath(destDir);
+        await Task.Run(() =>
+        {
+            using var zip = ZipFile.OpenRead(archivePath);
+            var total = zip.Entries.Count;
+            var i = 0;
+            foreach (var e in zip.Entries)
+            {
+                ct.ThrowIfCancellationRequested();
+                i++;
+                progress?.Report($"Распаковка: {i}/{total} {e.FullName}");
+                var target = Path.GetFullPath(Path.Combine(destDir, e.FullName));
+                if (!target.StartsWith(destFull, StringComparison.OrdinalIgnoreCase)) continue;
+                var dir = Path.GetDirectoryName(target);
+                if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
+                if (string.IsNullOrEmpty(e.Name)) continue;
+                using var src = e.Open();
+                using var dst = new FileStream(target, FileMode.Create, FileAccess.Write, FileShare.None);
+                src.CopyTo(dst);
+            }
+        }, ct);
+    }
+
+    private static async Task ExtractManagedAsync(string archivePath, string destDir,
+        IProgress<string> progress, CancellationToken ct)
+    {
+        var destFull = Path.GetFullPath(destDir);
+        await Task.Run(() =>
+        {
+            using var archive = ArchiveFactory.Open(archivePath);
+            var files = archive.Entries.Where(e => !e.IsDirectory).ToList();
+            var i = 0;
+            foreach (var e in files)
+            {
+                ct.ThrowIfCancellationRequested();
+                i++;
+                progress?.Report($"Распаковка: {i}/{files.Count} {e.Key}");
+                var target = Path.GetFullPath(Path.Combine(destDir, e.Key ?? Path.GetFileName(archivePath)));
+                if (!target.StartsWith(destFull, StringComparison.OrdinalIgnoreCase)) continue;
+                var dir = Path.GetDirectoryName(target);
+                if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
+                using var src = e.OpenEntryStream();
+                using var dst = new FileStream(target, FileMode.Create, FileAccess.Write, FileShare.None);
+                src.CopyTo(dst);
+            }
+        }, ct);
     }
 
     private static string? FindSevenZip()

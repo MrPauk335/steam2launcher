@@ -15,6 +15,9 @@ public class GameEntry
     public string Name { get; set; } = "";
     public string Url { get; set; } = "";
     public string Description { get; set; } = "";
+    public string DirectUrl { get; set; } = "";
+    public string Exe { get; set; } = "";
+    public string LaunchArgs { get; set; } = "";
     public string InstallDir { get; set; } = "";
     public string ExePath { get; set; } = "";
     public GameStatus Status { get; set; } = GameStatus.NotDownloaded;

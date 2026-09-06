@@ -64,6 +64,8 @@ public class SavedEntry
 {
     public string Name { get; set; } = "";
     public string Url { get; set; } = "";
+    public string DirectUrl { get; set; } = "";
+    public string LaunchArgs { get; set; } = "";
     public string InstallDir { get; set; } = "";
     public string ExePath { get; set; } = "";
 }
