@@ -12,7 +12,7 @@ namespace Steam2Launcher;
 
 public partial class MainWindow : Window
 {
-    public const string CurrentVersion = "v1.4.0";
+    public const string CurrentVersion = "v1.4.1";
     public const string UpdateRepo = "MrPauk335/steam2launcher";
 
     private readonly Downloader _downloader = new();
@@ -870,12 +870,25 @@ del ""%~f0""
                 MessageBoxButton.OK, MessageBoxImage.Information);
             return;
         }
-        if (g.HasUpdates && !Directory.Exists(FullInstallPath(g)))
+        var repo = EffectiveRepo(g);
+        if (repo != null)
         {
-            _ = InstallBaseFromRepoAsync(g);
+            g.Repo = repo;
+            if (Directory.Exists(FullInstallPath(g)))
+                _ = UpdateAsync(g);
+            else
+                _ = InstallBaseFromRepoAsync(g);
             return;
         }
         _ = DownloadAsync(g);
+    }
+
+    private static string? EffectiveRepo(GameItem g)
+    {
+        if (!string.IsNullOrWhiteSpace(g.Repo)) return g.Repo;
+        var inferred = Downloader.GitRepoFromUrl(g.Url);
+        if (!string.IsNullOrWhiteSpace(inferred)) return inferred;
+        return null;
     }
 
     private async Task DownloadAsync(GameItem g)

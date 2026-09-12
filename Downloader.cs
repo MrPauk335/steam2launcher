@@ -499,6 +499,23 @@ public class Downloader
         return "download_" + Guid.NewGuid().ToString("N")[..8];
     }
 
+    /// <summary>
+    /// Extracts "owner/repo" from a GitHub URL (repo root, releases page or direct
+    /// download link). Returns null if the URL isn't a GitHub repository link.
+    /// </summary>
+    public static string? GitRepoFromUrl(string url)
+    {
+        if (string.IsNullOrWhiteSpace(url)) return null;
+        if (!url.Contains("github.com", StringComparison.OrdinalIgnoreCase)) return null;
+        var m = Regex.Match(url, @"github\.com/([^/]+)/([^/?#]+)");
+        if (!m.Success) return null;
+        var owner = m.Groups[1].Value.Trim();
+        var repo = m.Groups[2].Value.Trim();
+        if (string.IsNullOrWhiteSpace(owner) || string.IsNullOrWhiteSpace(repo)) return null;
+        if (owner.Equals("github.com", StringComparison.OrdinalIgnoreCase)) return null;
+        return owner + "/" + repo;
+    }
+
     public async Task<string> GetStringAsync(string url, CancellationToken ct)
     {
         using var req = new HttpRequestMessage(HttpMethod.Get, url);
