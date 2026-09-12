@@ -246,7 +246,7 @@ public static class BuildUpdater
     private static HttpClient MakeHttp()
     {
         var h = new HttpClient { Timeout = TimeSpan.FromSeconds(15) };
-        h.DefaultRequestHeaders.UserAgent.ParseAdd("Steam2Launcher/1.3.0");
+        h.DefaultRequestHeaders.UserAgent.ParseAdd($"Steam2Launcher/{MainWindow.CurrentVersion}");
         h.DefaultRequestHeaders.Accept.ParseAdd("application/vnd.github+json");
         return h;
     }

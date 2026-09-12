@@ -1,21 +1,24 @@
 ﻿using System.Collections.ObjectModel;
 using System.Diagnostics;
 using System.IO;
+using System.IO.Compression;
 using System.Net.Http;
 using System.Windows;
 using System.Windows.Input;
+using Cursors = System.Windows.Input.Cursors;
 using MessageBox = System.Windows.MessageBox;
 
 namespace Steam2Launcher;
 
 public partial class MainWindow : Window
 {
-    public const string CurrentVersion = "v1.3.1";
+    public const string CurrentVersion = "v1.4.0";
     public const string UpdateRepo = "MrPauk335/steam2launcher";
 
     private readonly Downloader _downloader = new();
     private readonly ObservableCollection<GameItem> _games = new();
     private CancellationTokenSource? _cts;
+    private PauseTokenSource? _pause;
     private string _installRoot = "";
     private string _theme = "Dark";
     public string? LatestVersion { get; private set; }
@@ -29,7 +32,68 @@ public partial class MainWindow : Window
         LoadSettings();
         RescanPost();
         _ = CheckForUpdatesAsync();
+        UpdateButtonStates();
     }
+
+    // ====================== Button state management ======================
+
+    private bool IsBusy => Selected?.IsDownloading == true;
+
+    private void UpdateButtonStates()
+    {
+        var g = Selected;
+        var busy = g != null && g.IsDownloading;
+
+        BtnDownload.IsEnabled = g != null && !busy;
+        BtnUpdate.IsEnabled = g != null && !busy && g.HasUpdates && g.IsInstalled;
+        BtnPause.IsEnabled = busy;
+        BtnCancel.IsEnabled = busy;
+
+        if (busy)
+        {
+            BtnDownload.Content = "Скачать";
+            BtnDownload.IsEnabled = false;
+            BtnPause.Content = _pause?.IsPaused == true ? "▶ Продолжить" : "⏸ Пауза";
+        }
+        else
+        {
+            BtnPause.Content = "⏸ Пауза";
+        }
+    }
+
+    private void RefreshUpdateButton() => UpdateButtonStates();
+
+    private void GamesGrid_SelectionChanged(object sender, System.Windows.Controls.SelectionChangedEventArgs e)
+    {
+        UpdateButtonStates();
+    }
+
+    // ====================== Pause / Cancel buttons ======================
+
+    private void BtnPause_Click(object sender, RoutedEventArgs e)
+    {
+        if (_pause == null) return;
+        if (_pause.IsPaused)
+        {
+            _pause.Resume();
+            BtnPause.Content = "⏸ Пауза";
+            TxtProgress.Text = TxtProgress.Text.Replace(" [ПАУЗА]", "") + " [ПАУЗА]";
+        }
+        else
+        {
+            _pause.Pause();
+            BtnPause.Content = "▶ Продолжить";
+            TxtProgress.Text += " [ПАУЗА]";
+        }
+    }
+
+    private void BtnCancel_Click(object sender, RoutedEventArgs e)
+    {
+        _cts?.Cancel();
+        _pause?.Resume(); // unblock the read loop so cancellation propagates
+    }
+
+    // ====================== Auto-update check ======================
 
     private async Task CheckForUpdatesAsync()
     {
@@ -73,7 +137,6 @@ public partial class MainWindow : Window
 
     private static bool IsNewer(string remote, string local)
     {
-        // strip leading 'v', compare tuples
         int[] Parse(string s) => s.TrimStart('v', 'V').Split('.', StringSplitOptions.RemoveEmptyEntries)
             .Select(p => int.TryParse(p, out var n) ? n : 0).ToArray();
         var a = Parse(remote); var b = Parse(local);
@@ -89,7 +152,7 @@ public partial class MainWindow : Window
 
     private void ShowUpdateBanner(string tag, string url)
     {
-        TxtUpdate.Text = $"🔔 Доступно обновление {tag} (у тебя {CurrentVersion})";
+        TxtUpdate.Text = $"Обновление {tag} доступно (у тебя {CurrentVersion}) — нажмите, чтобы обновить";
         TxtUpdate.Tag = url;
         TxtUpdate.Visibility = Visibility.Visible;
         TxtUpdate.Cursor = System.Windows.Input.Cursors.Hand;
@@ -99,18 +162,131 @@ public partial class MainWindow : Window
 
     private void TxtUpdate_Click(object sender, System.Windows.Input.MouseButtonEventArgs e)
     {
-        var url = (sender as System.Windows.Controls.TextBlock)?.Tag as string;
-        if (string.IsNullOrEmpty(url)) return;
-        try { System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo { FileName = url, UseShellExecute = true }); }
-        catch { }
+        _ = SelfUpdateAsync();
     }
+
+    /// <summary>
+    /// Self-update: download new launcher zip, extract, write swap script, restart.
+    /// </summary>
+    private async Task SelfUpdateAsync()
+    {
+        if (string.IsNullOrEmpty(LatestVersion) || string.IsNullOrEmpty(LatestAssetUrl))
+        {
+            if (!string.IsNullOrEmpty(LatestUrl))
+                try { Process.Start(new ProcessStartInfo { FileName = LatestUrl, UseShellExecute = true }); } catch { }
+            return;
+        }
+
+        var tag = LatestVersion;
+        var assetUrl = LatestAssetUrl;
+
+        TxtUpdate.Text = $"Скачивание обновления {tag}…";
+        TxtUpdate.Cursor = Cursors.Arrow;
+
+        _cts = new CancellationTokenSource();
+        _pause = new PauseTokenSource();
+        var ct = _cts.Token;
+
+        try
+        {
+            var stagingDir = Path.Combine(Path.GetTempPath(), "steam2launcher_upd_" + GameEntry.Sanitize(tag));
+            Directory.CreateDirectory(stagingDir);
+            var zipPath = Path.Combine(stagingDir, "update.zip");
+
+            var progress = new Progress<DownloadProgress>(p =>
+            {
+                TxtProgress.Text = $"Обновление лаунчера: {p.Message}";
+                Progress.IsIndeterminate = false;
+                Progress.Value = p.Percent;
+            });
+
+            var result = await _downloader.DownloadAsync(assetUrl, zipPath, progress, ct);
+            if (!result.Success)
+                throw new Exception("Ошибка скачивания обновления: " + result.Error);
+
+            TxtUpdate.Text = $"Распаковка обновления {tag}…";
+            Progress.IsIndeterminate = true;
+
+            // Extract zip: find the Steam2Launcher.exe inside
+            var newExePath = "";
+            using (var zip = ZipFile.OpenRead(zipPath))
+            {
+                foreach (var entry in zip.Entries)
+                {
+                    var name = Path.GetFileName(entry.FullName);
+                    if (name.Equals("Steam2Launcher.exe", StringComparison.OrdinalIgnoreCase))
+                    {
+                        newExePath = Path.Combine(stagingDir, name);
+                        entry.ExtractToFile(newExePath, true);
+                        break;
+                    }
+                }
+            }
+
+            if (string.IsNullOrEmpty(newExePath) || !File.Exists(newExePath))
+                throw new Exception("В обновлении нет Steam2Launcher.exe");
+
+            // Write swap script
+            var currentExe = Process.GetCurrentProcess().MainModule?.FileName
+                ?? Path.Combine(AppInfo.BaseDir, "Steam2Launcher.exe");
+            var exeDir = Path.GetDirectoryName(currentExe) ?? AppInfo.BaseDir;
+
+            var scriptPath = Path.Combine(stagingDir, "swap.cmd");
+            var script = $@"@echo off
+chcp 65001 >nul
+:wait
+tasklist /FI ""IMAGENAME eq Steam2Launcher.exe"" 2>nul | find /I ""Steam2Launcher.exe"" >nul
+if %errorlevel%==0 ( timeout /t 1 /nobreak >nul & goto wait )
+copy /Y ""{newExePath}"" ""{currentExe}"" >nul
+del /q ""{zipPath}"" 2>nul
+del /q ""{newExePath}"" 2>nul
+rmdir ""{stagingDir}"" 2>nul
+start """" ""{currentExe}""
+del ""%~f0""
+";
+            File.WriteAllText(scriptPath, script);
+
+            TxtUpdate.Text = $"Обновление готово! Перезапуск…";
+            Progress.Value = 100;
+
+            // Launch swap script and exit
+            Process.Start(new ProcessStartInfo
+            {
+                FileName = "cmd.exe",
+                Arguments = $"/c \"{scriptPath}\"",
+                UseShellExecute = true,
+                CreateNoWindow = true
+            });
+
+            Environment.Exit(0);
+        }
+        catch (OperationCanceledException)
+        {
+            TxtUpdate.Text = "Обновление отменено";
+            TxtUpdate.Cursor = Cursors.Hand;
+            TxtUpdate.Tag = LatestUrl;
+        }
+        catch (Exception ex)
+        {
+            TxtUpdate.Text = $"Ошибка обновления: {ex.Message} — нажмите для перехода на страницу";
+            TxtUpdate.Cursor = Cursors.Hand;
+            TxtUpdate.Tag = LatestUrl;
+        }
+        finally
+        {
+            _pause = null;
+            UpdateButtonStates();
+            Progress.IsIndeterminate = false;
+        }
+    }
+
+    // ====================== Settings ======================
 
     private void LoadSettings()
     {
         var settings = Storage.LoadSettings();
         SeedKnownCredentials(settings);
 
-        // Data file candidates: games.json (preferred) then post.txt, at source folder / exe folder / cwd
         var root = Path.GetFullPath(Path.Combine(AppInfo.BaseDir, "..", "..", "..", ".."));
         var sourceJson = Path.Combine(root, "games.json");
         var sourceTxt = Path.Combine(root, "post.txt");
@@ -147,8 +323,6 @@ public partial class MainWindow : Window
 
     private static void SeedKnownCredentials(AppSettings settings)
     {
-        // Known leak-hosting creds so hosted builds download without prompting.
-        // Always overwrites so stale/wrong values never get stuck.
         var known = new (string Host, string Creds)[]
         {
             ("files.kotle.uk", "gaben:gaben"),
@@ -191,6 +365,8 @@ public partial class MainWindow : Window
         Storage.SaveSettings(settings);
     }
 
+    // ====================== Game list ======================
+
     private void RescanPost()
     {
         if (!File.Exists(AppInfo.PostPath))
@@ -224,7 +400,6 @@ public partial class MainWindow : Window
             }
             if (installed && string.IsNullOrEmpty(g.ExePath))
             {
-                // Server-recommended exe (relative to install dir) if it exists, else auto-detect
                 var suggested = e.Exe;
                 if (!string.IsNullOrWhiteSpace(suggested))
                 {
@@ -327,46 +502,26 @@ public partial class MainWindow : Window
 
     private GameItem? Selected => GamesGrid.SelectedItem as GameItem;
 
-    // ---------- Инкрементальные обновления (delta-патчи с GitHub) ----------
+    // ====================== Install from base parts (download ALL, then extract ALL) ======================
 
-    private void RefreshUpdateButton()
-    {
-        var g = Selected;
-        BtnUpdate.IsEnabled = g != null && g.HasUpdates && g.IsInstalled && !g.IsDownloading;
-    }
-
-    private void GamesGrid_SelectionChanged(object sender, System.Windows.Controls.SelectionChangedEventArgs e)
-        => RefreshUpdateButton();
-
-    private void BtnUpdate_Click(object sender, RoutedEventArgs e)
-    {
-        var g = Selected;
-        if (g == null) return;
-        if (g.IsDownloading)
-        {
-            _cts?.Cancel();
-            return;
-        }
-        _ = UpdateAsync(g);
-    }
-
-    /// <summary>
-    /// Full base install from GitHub parts (game has Repo but nothing installed yet).
-    /// Downloads every fstop_part_XX.zip from the latest base release and extracts them.
-    /// </summary>
     private async Task InstallBaseFromRepoAsync(GameItem g)
     {
         _cts = new CancellationTokenSource();
+        _pause = new PauseTokenSource();
         var ct = _cts.Token;
         g.IsBusy = true;
         g.StatusText = "Поиск базы…";
         Progress.IsIndeterminate = true;
         TxtProgress.Text = "Запрос частей базы…";
+        UpdateButtonStates();
 
         var dest = FullInstallPath(g);
         Directory.CreateDirectory(dest);
+        var workDir = Path.Combine(Path.GetTempPath(), "steam2base_" + GameEntry.Sanitize(g.Name) + "_" + Guid.NewGuid().ToString("N")[..8]);
+        Directory.CreateDirectory(workDir);
         try
         {
+            // ---- Fetch manifest ----
             var (manifest, partUrls, error) = await BuildUpdater.FetchBasePartsAsync(g.Repo, ct);
             if (manifest == null || partUrls.Count == 0)
             {
@@ -375,49 +530,91 @@ public partial class MainWindow : Window
                 throw new Exception("База не найдена в репозитории обновлений.");
             }
 
-            for (var i = 0; i < partUrls.Count; i++)
+            // ---- Phase 1: probe sizes via HEAD ----
+            TxtProgress.Text = "Определение размеров…";
+            var sizes = new long[partUrls.Count];
+            long totalBytes = 0;
+            for (int i = 0; i < partUrls.Count; i++)
             {
                 ct.ThrowIfCancellationRequested();
+                _pause.Wait(ct);
+                var sz = await _downloader.GetFileSizeAsync(partUrls[i], ct);
+                sizes[i] = sz ?? 0;
+                totalBytes += sizes[i];
+            }
+            var hasTotal = totalBytes > 0;
+            long downloadedSoFar = 0;
+
+            // ---- Phase 2: download ALL parts ----
+            var localParts = new List<string>();
+            for (int i = 0; i < partUrls.Count; i++)
+            {
+                ct.ThrowIfCancellationRequested();
+                _pause.Wait(ct);
+
                 var partUrl = partUrls[i];
                 var fileName = Downloader.FileNameFromUrl(partUrl);
                 if (string.IsNullOrEmpty(fileName)) fileName = $"part_{i + 1}.zip";
-                var downloadPath = Path.Combine(Path.GetTempPath(),
-                    "steam2base_" + Guid.NewGuid().ToString("N")[..8] + "_" + GameEntry.Sanitize(fileName));
+                var localPath = Path.Combine(workDir, fileName);
+                localParts.Add(localPath);
 
-                g.StatusText = $"Скачивание {i + 1}/{partUrls.Count}…";
-                Progress.IsIndeterminate = true;
-                TxtProgress.Text = $"Часть {i + 1} из {partUrls.Count} ({fileName})";
+                g.StatusText = $"Скачивание: часть {i + 1}/{partUrls.Count}";
+                var capturedIdx = i;
+                var capturedFar = downloadedSoFar;
 
-                var progress = new Progress<DownloadProgress>(p =>
+                var partProgress = new Progress<DownloadProgress>(p =>
                 {
-                    g.StatusText = $"Часть {i + 1}/{partUrls.Count}";
+                    var overallBytes = capturedFar + p.DownloadedBytes;
+                    var pct = hasTotal ? (double)overallBytes / totalBytes * 100.0 : 0;
+                    var speed = p.SpeedBytesPerSec;
+                    var remaining = hasTotal ? totalBytes - overallBytes : 0;
+                    var eta = speed > 0 && remaining > 0 ? TimeSpan.FromSeconds(remaining / speed) : (TimeSpan?)null;
+                    var etaStr = eta != null
+                        ? eta.Value.TotalHours >= 1 ? $"  осталось {eta.Value.Hours}ч {eta.Value.Minutes}мин"
+                                                  : $"  осталось {eta.Value.Minutes}мин {eta.Value.Seconds}сек"
+                        : "";
+
+                    g.StatusText = $"Скачивание: {capturedIdx + 1}/{partUrls.Count}";
                     Progress.IsIndeterminate = false;
-                    Progress.Value = p.Percent;
-                    TxtProgress.Text = p.Message;
+                    Progress.Value = Math.Min(pct, 100);
+                    TxtProgress.Text = $"Часть {capturedIdx + 1}/{partUrls.Count}" +
+                        $"  {FormatBytes(overallBytes)}{(hasTotal ? " / " + FormatBytes(totalBytes) : "")}" +
+                        $"  {FormatPercent(pct)}" +
+                        (speed > 0 ? $"  {speed / 1048576.0:0.0} МБ/с" : "") +
+                        etaStr +
+                        (_pause?.IsPaused == true ? "  [ПАУЗА]" : "");
                 });
 
-                var result = await _downloader.DownloadAsync(partUrl, downloadPath, progress, ct, PromptCredentials);
+                var result = await _downloader.DownloadAsync(partUrl, localPath, partProgress, ct, PromptCredentials, _pause);
                 if (!result.Success)
                     throw new Exception($"Ошибка загрузки части {i + 1}: {result.Error}");
 
-                if (ArchiveExtractor.IsArchive(downloadPath, result.ContentType))
-                {
-                    var exProgress = new Progress<string>(msg =>
-                    {
-                        g.StatusText = msg;
-                        Progress.IsIndeterminate = true;
-                        TxtProgress.Text = msg;
-                    });
-                    await ArchiveExtractor.ExtractAsync(downloadPath, dest, exProgress, ct);
-                }
-                else
-                {
-                    File.Move(downloadPath, Path.Combine(dest, Path.GetFileName(downloadPath)), true);
-                }
-
-                try { File.Delete(downloadPath); } catch { }
+                downloadedSoFar += sizes[i] > 0 ? sizes[i] : new FileInfo(localPath).Length;
             }
 
+            // ---- Phase 3: extract ALL parts ----
+            g.StatusText = "Распаковка…";
+            Progress.IsIndeterminate = true;
+
+            for (int i = 0; i < localParts.Count; i++)
+            {
+                ct.ThrowIfCancellationRequested();
+                _pause.Wait(ct);
+
+                var partPath = localParts[i];
+                TxtProgress.Text = $"Распаковка: часть {i + 1}/{localParts.Count} ({Path.GetFileName(partPath)})";
+
+                var exProgress = new Progress<string>(msg =>
+                {
+                    g.StatusText = msg;
+                    TxtProgress.Text = msg;
+                });
+                await ArchiveExtractor.ExtractAsync(partPath, dest, exProgress, ct, _pause);
+
+                try { File.Delete(partPath); } catch { }
+            }
+
+            // ---- Phase 4: finalize ----
             BuildUpdater.WriteBuildInfo(dest, manifest.Base, manifest.Version);
             g.BaseVersion = manifest.Base;
             g.InstalledVersion = manifest.Version;
@@ -449,19 +646,25 @@ public partial class MainWindow : Window
         finally
         {
             g.IsBusy = false;
+            _pause = null;
             Progress.IsIndeterminate = false;
             RefreshUpdateButton();
+            try { Directory.Delete(workDir, true); } catch { }
         }
     }
+
+    // ====================== Delta update ======================
 
     private async Task UpdateAsync(GameItem g)
     {
         _cts = new CancellationTokenSource();
+        _pause = new PauseTokenSource();
         var ct = _cts.Token;
         g.IsBusy = true;
         g.StatusText = "Проверка обновлений…";
         Progress.IsIndeterminate = true;
         TxtProgress.Text = "Запрос к GitHub…";
+        UpdateButtonStates();
 
         try
         {
@@ -491,10 +694,8 @@ public partial class MainWindow : Window
 
             if (manifest.Base != g.BaseVersion)
             {
-                // New base: reinstall from GitHub parts (kind=base) is the clean way now.
                 var answer = MessageBox.Show(
                     $"Вышла новая БАЗА обновления (v{manifest.Base}) — текущая база v{g.BaseVersion}.\n\n" +
-                    "Инкрементальное обновление поверх старой базы не подходит.\n" +
                     "Лаунчер перекачает новую базу и затем применит обновления.",
                     "Steam2 Лаунчер", MessageBoxButton.YesNo, MessageBoxImage.Information);
                 if (answer == MessageBoxResult.Yes)
@@ -517,29 +718,29 @@ public partial class MainWindow : Window
             {
                 Progress.IsIndeterminate = false;
                 Progress.Value = p.Percent;
-                TxtProgress.Text = "Обновление: " + p.Message;
+                TxtProgress.Text = $"Обновление: {p.Message}";
             });
-            var result = await _downloader.DownloadAsync(deltaUrl ?? "", downloadPath, progress, ct, PromptCredentials);
+            var result = await _downloader.DownloadAsync(deltaUrl ?? "", downloadPath, progress, ct, PromptCredentials, _pause);
             if (!result.Success)
                 throw new Exception("Ошибка загрузки обновления: " + result.Error);
 
-            // Extract over the install dir (overwrites changed files)
+            // Extract over the install dir
             if (ArchiveExtractor.IsArchive(downloadPath, result.ContentType))
             {
+                g.StatusText = "Распаковка обновления…";
                 var exProgress = new Progress<string>(msg =>
                 {
                     g.StatusText = msg;
                     Progress.IsIndeterminate = true;
                     TxtProgress.Text = msg;
                 });
-                await ArchiveExtractor.ExtractAsync(downloadPath, installDir, exProgress, ct);
+                await ArchiveExtractor.ExtractAsync(downloadPath, installDir, exProgress, ct, _pause);
             }
             else
             {
                 File.Move(downloadPath, Path.Combine(installDir, Path.GetFileName(downloadPath)), true);
             }
 
-            // Delete removed files + stamp new buildinfo
             BuildUpdater.ApplyRemoved(installDir, manifest.Removed);
             BuildUpdater.WriteBuildInfo(installDir, manifest.Base, manifest.Version);
             g.BaseVersion = manifest.Base;
@@ -564,22 +765,25 @@ public partial class MainWindow : Window
         finally
         {
             g.IsBusy = false;
+            _pause = null;
             Progress.IsIndeterminate = false;
             RefreshUpdateButton();
         }
     }
 
-    // ---------- Авто-установка SmartSteamEmu ----------
+    private void BtnUpdate_Click(object sender, RoutedEventArgs e)
+    {
+        var g = Selected;
+        if (g == null) return;
+        _ = UpdateAsync(g);
+    }
+
+    // ====================== SmartSteamEmu ======================
 
     private static bool IsEmulator(GameItem g) =>
         g.Name.Contains("SmartSteamEmu", StringComparison.OrdinalIgnoreCase)
         || g.Url.Contains("SmartSteamEmu", StringComparison.OrdinalIgnoreCase);
 
-    /// <summary>
-    /// После установки любой игры доматывает SmartSteamEmu (если лаунчер его скачал)
-    /// в папки всех установленных игр, чтобы эмулятор работал без ручных шагов.
-    /// Папка эмулятора ищется как "SmartSteamEmu/SmartSteamEmu" внутри его установки.
-    /// </summary>
     private void AfterInstall(GameItem justInstalled)
     {
         var emu = _games.FirstOrDefault(IsEmulator);
@@ -605,7 +809,6 @@ public partial class MainWindow : Window
             CopyPayload(payload, target);
         }
 
-        // Сам эмулятор удобнее запускать через SSELauncher.exe (графический лаунчер)
         if (ReferenceEquals(justInstalled, emu))
         {
             var sse = Path.Combine(emuDir, "SSELauncher.exe");
@@ -630,7 +833,8 @@ public partial class MainWindow : Window
             CopyDirectory(d, Path.Combine(dstDir, Path.GetFileName(d)));
     }
 
-    /// <summary>Handles HTTP 401: returns saved or user-entered "user:pass", or null if cancelled.</summary>
+    // ====================== Auth ======================
+
     private Task<string?> PromptCredentials(Downloader downloader, Uri uri, int tryIndex)
     {
         var settings = Storage.LoadSettings();
@@ -642,7 +846,7 @@ public partial class MainWindow : Window
             savedUser = saved[..saved.IndexOf(':')];
             var savedPass = saved[(saved.IndexOf(':') + 1)..];
             if (tryIndex == 1 && !string.IsNullOrEmpty(savedUser) && !string.IsNullOrEmpty(savedPass))
-                return Task.FromResult<string?>(saved); // first retry: silently reuse stored credentials
+                return Task.FromResult<string?>(saved);
         }
 
         var dlg = new AuthDialog(host);
@@ -655,6 +859,8 @@ public partial class MainWindow : Window
         return Task.FromResult<string?>(joined);
     }
 
+    // ====================== Download / Launch ======================
+
     private void BtnDownload_Click(object sender, RoutedEventArgs e)
     {
         var g = Selected;
@@ -664,12 +870,6 @@ public partial class MainWindow : Window
                 MessageBoxButton.OK, MessageBoxImage.Information);
             return;
         }
-        if (g.IsDownloading)
-        {
-            _cts?.Cancel();
-            return;
-        }
-        // Games with a Repo install the base straight from GitHub parts.
         if (g.HasUpdates && !Directory.Exists(FullInstallPath(g)))
         {
             _ = InstallBaseFromRepoAsync(g);
@@ -681,15 +881,16 @@ public partial class MainWindow : Window
     private async Task DownloadAsync(GameItem g)
     {
         _cts = new CancellationTokenSource();
+        _pause = new PauseTokenSource();
         var ct = _cts.Token;
         g.IsBusy = true;
         g.StatusText = "Определение ссылки…";
         Progress.IsIndeterminate = true;
         TxtProgress.Text = "Подключение…";
+        UpdateButtonStates();
 
         try
         {
-            // Direct link already resolved on the server -> skip network resolution
             var (directUrl, fileName) = !string.IsNullOrWhiteSpace(g.DirectUrl)
                 ? (g.DirectUrl, Downloader.FileNameFromUrl(g.DirectUrl))
                 : await _downloader.ResolveAsync(g.Url, ct);
@@ -705,11 +906,10 @@ public partial class MainWindow : Window
                 TxtProgress.Text = p.Message;
             });
 
-            var result = await _downloader.DownloadAsync(directUrl, downloadPath, progress, ct, PromptCredentials);
+            var result = await _downloader.DownloadAsync(directUrl, downloadPath, progress, ct, PromptCredentials, _pause);
             if (!result.Success)
                 throw new Exception("Ошибка загрузки: " + result.Error);
 
-            // Extract
             var dest = FullInstallPath(g);
             Directory.CreateDirectory(dest);
 
@@ -721,11 +921,10 @@ public partial class MainWindow : Window
                     Progress.IsIndeterminate = true;
                     TxtProgress.Text = msg;
                 });
-                await ArchiveExtractor.ExtractAsync(downloadPath, dest, exProgress, ct);
+                await ArchiveExtractor.ExtractAsync(downloadPath, dest, exProgress, ct, _pause);
             }
             else
             {
-                // Not an archive - just move the downloaded file into install dir
                 var targetFile = Path.Combine(dest, Path.GetFileName(downloadPath));
                 File.Move(downloadPath, targetFile, true);
             }
@@ -740,7 +939,6 @@ public partial class MainWindow : Window
             AfterInstall(g);
             if (g.HasUpdates)
             {
-                // Fresh base archive is version 1; deltas from the update repo bump it later.
                 BuildUpdater.WriteBuildInfo(dest, 1, 1);
                 g.BaseVersion = 1;
                 g.InstalledVersion = 1;
@@ -777,6 +975,7 @@ public partial class MainWindow : Window
         finally
         {
             g.IsBusy = false;
+            _pause = null;
             Progress.IsIndeterminate = false;
             RefreshUpdateButton();
         }
@@ -866,4 +1065,16 @@ public partial class MainWindow : Window
             GamesGrid.Items.Refresh();
         }
     }
+
+    // ====================== Helpers ======================
+
+    private static string FormatBytes(long b)
+    {
+        if (b >= 1073741824) return $"{b / 1073741824.0:0.00} ГБ";
+        if (b >= 1048576) return $"{b / 1048576.0:0.0} МБ";
+        if (b >= 1024) return $"{b / 1024.0:0.0} КБ";
+        return $"{b} Б";
+    }
+
+    private static string FormatPercent(double pct) => $"{pct:0.0}%";
 }

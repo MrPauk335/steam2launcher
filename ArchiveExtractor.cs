@@ -22,21 +22,21 @@ public static class ArchiveExtractor
     }
 
     public static async Task ExtractAsync(string archivePath, string destDir,
-        IProgress<string> progress, CancellationToken ct)
+        IProgress<string> progress, CancellationToken ct, PauseTokenSource? pause = null)
     {
         Directory.CreateDirectory(destDir);
         var ext = Path.GetExtension(archivePath).ToLowerInvariant();
 
         if (ext == ".zip")
         {
-            await ExtractZipManagedAsync(archivePath, destDir, progress, ct);
+            await ExtractZipManagedAsync(archivePath, destDir, progress, ct, pause);
             return;
         }
 
         // 7z / rar => managed SharpCompress first, fall back to external 7-Zip
         try
         {
-            await ExtractManagedAsync(archivePath, destDir, progress, ct);
+            await ExtractManagedAsync(archivePath, destDir, progress, ct, pause);
             return;
         }
         catch (Exception ex) when (ex is SharpCompress.Common.ArchiveException
@@ -72,7 +72,7 @@ public static class ArchiveExtractor
     }
 
     private static async Task ExtractZipManagedAsync(string archivePath, string destDir,
-        IProgress<string> progress, CancellationToken ct)
+        IProgress<string> progress, CancellationToken ct, PauseTokenSource? pause)
     {
         var destFull = Path.GetFullPath(destDir);
         await Task.Run(() =>
@@ -83,6 +83,7 @@ public static class ArchiveExtractor
             foreach (var e in zip.Entries)
             {
                 ct.ThrowIfCancellationRequested();
+                pause?.Wait(ct);
                 i++;
                 progress?.Report($"Распаковка: {i}/{total} {e.FullName}");
                 var target = Path.GetFullPath(Path.Combine(destDir, e.FullName));
@@ -98,7 +99,7 @@ public static class ArchiveExtractor
     }
 
     private static async Task ExtractManagedAsync(string archivePath, string destDir,
-        IProgress<string> progress, CancellationToken ct)
+        IProgress<string> progress, CancellationToken ct, PauseTokenSource? pause)
     {
         var destFull = Path.GetFullPath(destDir);
         await Task.Run(() =>
@@ -109,6 +110,7 @@ public static class ArchiveExtractor
             foreach (var e in files)
             {
                 ct.ThrowIfCancellationRequested();
+                pause?.Wait(ct);
                 i++;
                 progress?.Report($"Распаковка: {i}/{files.Count} {e.Key}");
                 var target = Path.GetFullPath(Path.Combine(destDir, e.Key ?? Path.GetFileName(archivePath)));
