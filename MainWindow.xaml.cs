@@ -4,15 +4,21 @@ using System.IO;
 using System.IO.Compression;
 using System.Net.Http;
 using System.Windows;
+using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
 using System.Windows.Input;
+using System.Windows.Media;
 using Cursors = System.Windows.Input.Cursors;
 using MessageBox = System.Windows.MessageBox;
+using Brush = System.Windows.Media.Brush;
+using Brushes = System.Windows.Media.Brushes;
+using BrushConverter = System.Windows.Media.BrushConverter;
 
 namespace Steam2Launcher;
 
 public partial class MainWindow : Window
 {
-    public const string CurrentVersion = "v1.4.1";
+    public const string CurrentVersion = "v1.5.0";
     public const string UpdateRepo = "MrPauk335/steam2launcher";
 
     private readonly Downloader _downloader = new();
@@ -25,50 +31,169 @@ public partial class MainWindow : Window
     public string? LatestUrl { get; private set; }
     public string? LatestAssetUrl { get; private set; }
 
+    private readonly ContextMenu _ctxMenu = new();
+    private readonly MenuItem _ctxMainItem = new() { Header = "Скачать" };
+    private readonly MenuItem _ctxPlayItem = new() { Header = "Играть" };
+    private readonly MenuItem _ctxVerifyItem = new() { Header = "Проверить целостность" };
+    private readonly MenuItem _ctxUninstallItem = new() { Header = "Удалить игру" };
+    private readonly MenuItem _ctxEditItem = new() { Header = "Свойства" };
+    private readonly MenuItem _ctxFolderItem = new() { Header = "Открыть папку" };
+
     public MainWindow()
     {
         InitializeComponent();
-        GamesGrid.ItemsSource = _games;
+        BuildContextMenu();
+        GamesList.ItemsSource = _games;
         LoadSettings();
         RescanPost();
         _ = CheckForUpdatesAsync();
         UpdateButtonStates();
     }
 
-    // ====================== Button state management ======================
+    private void BuildContextMenu()
+    {
+        _ctxMainItem.Click += (s, e) => BtnMain_Click(s, e);
+        _ctxPlayItem.Click += (s, e) => { var g = Selected; if (g?.IsInstalled == true) LaunchGame(g); };
+        _ctxVerifyItem.Click += (s, e) => BtnVerify_Click(s, e);
+        _ctxUninstallItem.Click += (s, e) => BtnUninstall_Click(s, e);
+        _ctxEditItem.Click += (s, e) => BtnEdit_Click(s, e);
+        _ctxFolderItem.Click += (s, e) => BtnOpenFolder_Click(s, e);
+        _ctxMenu.Items.Add(_ctxMainItem);
+        _ctxMenu.Items.Add(_ctxPlayItem);
+        _ctxMenu.Items.Add(new Separator());
+        _ctxMenu.Items.Add(_ctxVerifyItem);
+        _ctxMenu.Items.Add(_ctxUninstallItem);
+        _ctxMenu.Items.Add(new Separator());
+        _ctxMenu.Items.Add(_ctxEditItem);
+        _ctxMenu.Items.Add(_ctxFolderItem);
+    }
 
-    private bool IsBusy => Selected?.IsDownloading == true;
+    // ═══════════════════════════ Selection / Details ═══════════════════════════
+
+    private GameItem? Selected => GamesList.SelectedItem as GameItem;
+
+    private void GamesList_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        RefreshDetails();
+        UpdateButtonStates();
+    }
+
+    private void RefreshDetails()
+    {
+        var g = Selected;
+        if (g == null)
+        {
+            try { TileHero.Background = new BrushConverter().ConvertFromString("#3B82F6") as Brush ?? Brushes.Blue; }
+            catch { }
+            HeroDot.Fill = Brushes.Transparent;
+            LitName.Text = "Выберите игру";
+            LitStatus.Text = "";
+            LitDesc.Text = "";
+            LitMeta.Text = "";
+            _ctxMainItem.Visibility = Visibility.Collapsed;
+            _ctxPlayItem.Visibility = Visibility.Collapsed;
+            _ctxVerifyItem.Visibility = Visibility.Collapsed;
+            _ctxUninstallItem.Visibility = Visibility.Collapsed;
+            _ctxEditItem.Visibility = Visibility.Collapsed;
+            _ctxFolderItem.Visibility = Visibility.Collapsed;
+            return;
+        }
+
+        try { TileHero.Background = new BrushConverter().ConvertFromString(g.StatusColour) as Brush ?? Brushes.SlateGray; }
+        catch { }
+        HeroDot.Fill = g.StatusBrush;
+        LitName.Text = g.Name;
+        LitStatus.Text = g.StatusText;
+        LitDesc.Text = string.IsNullOrWhiteSpace(g.Description) ? "" : g.Description;
+
+        var lines = new List<string>();
+        if (g.IsInstalled)
+        {
+            var ver = g.InstalledVersion > 0 ? $"v{g.InstalledVersion}" : "—";
+            var bver = g.HasUpdates && g.BaseVersion > 0 ? $"  (база v{g.BaseVersion})" : "";
+            lines.Add($"Версия: {ver}{bver}");
+            lines.Add($"Папка: {FullInstallPath(g)}");
+            if (!string.IsNullOrEmpty(g.ExePath)) lines.Add($"Файл: {g.ExeName}");
+            if (g.HasUpdates) lines.Add("Обновления: GitHub");
+        }
+        else
+            lines.Add("Не установлена");
+        LitMeta.Text = string.Join(Environment.NewLine, lines);
+
+        var repo = EffectiveRepo(g);
+        if (!g.IsInstalled)
+        {
+            _ctxMainItem.Visibility = repo != null ? Visibility.Visible : Visibility.Collapsed;
+            _ctxMainItem.Header = "Скачать";
+            _ctxPlayItem.Visibility = Visibility.Collapsed;
+        }
+        else
+        {
+            _ctxMainItem.Visibility = g.HasUpdates ? Visibility.Visible : Visibility.Collapsed;
+            _ctxMainItem.Header = "Обновить";
+            _ctxPlayItem.Visibility = Visibility.Visible;
+        }
+        _ctxVerifyItem.Visibility = g.IsInstalled ? Visibility.Visible : Visibility.Collapsed;
+        _ctxUninstallItem.Visibility = g.IsInstalled ? Visibility.Visible : Visibility.Collapsed;
+        _ctxEditItem.Visibility = Visibility.Visible;
+        _ctxFolderItem.Visibility = g.IsInstalled ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    // ═══════════════════════════ Button state ═══════════════════════════
 
     private void UpdateButtonStates()
     {
         var g = Selected;
         var busy = g != null && g.IsDownloading;
 
-        BtnDownload.IsEnabled = g != null && !busy;
-        BtnUpdate.IsEnabled = g != null && !busy && g.HasUpdates && g.IsInstalled;
+        BtnMain.IsEnabled = g != null && !busy;
+        if (g == null) BtnMain.Content = "Выберите игру";
+        else if (busy) BtnMain.Content = "Загрузка…";
+        else if (!g.IsInstalled) BtnMain.Content = "Скачать";
+        else if (g.HasUpdates) BtnMain.Content = "Обновить";
+        else BtnMain.Content = "Играть";
+
+        BtnVerify.IsEnabled = g != null && !busy && g.IsInstalled;
+        BtnUninstall.IsEnabled = g != null && !busy && g.IsInstalled;
+        BtnOpenFolder.IsEnabled = g != null && !busy && g.IsInstalled;
+        BtnEdit.IsEnabled = g != null && !busy;
         BtnPause.IsEnabled = busy;
         BtnCancel.IsEnabled = busy;
 
         if (busy)
-        {
-            BtnDownload.Content = "Скачать";
-            BtnDownload.IsEnabled = false;
             BtnPause.Content = _pause?.IsPaused == true ? "▶ Продолжить" : "⏸ Пауза";
-        }
         else
-        {
             BtnPause.Content = "⏸ Пауза";
-        }
     }
 
-    private void RefreshUpdateButton() => UpdateButtonStates();
+    // ═══════════════════════════ Tile right-click selection ═══════════════════════════
 
-    private void GamesGrid_SelectionChanged(object sender, System.Windows.Controls.SelectionChangedEventArgs e)
+    private void GamesList_PreviewMouseRightButtonDown(object sender, MouseButtonEventArgs e)
     {
-        UpdateButtonStates();
+        var pos = e.GetPosition(GamesList);
+        var hit = VisualTreeHelper.HitTest(GamesList, pos);
+        if (hit == null) return;
+        var item = FindParent<ListBoxItem>(hit.VisualHit);
+        if (item != null) GamesList.SelectedItem = item.DataContext;
+        if (Selected == null) return;
+        RefreshDetails();
+        _ctxMenu.PlacementTarget = GamesList;
+        _ctxMenu.Placement = PlacementMode.MousePoint;
+        _ctxMenu.IsOpen = true;
+        e.Handled = true;
     }
 
-    // ====================== Pause / Cancel buttons ======================
+    private static T? FindParent<T>(DependencyObject current) where T : DependencyObject
+    {
+        while (current != null)
+        {
+            if (current is T typed) return typed;
+            current = VisualTreeHelper.GetParent(current);
+        }
+        return null;
+    }
+
+    // ═══════════════════════════ Pause / Cancel ═══════════════════════════
 
     private void BtnPause_Click(object sender, RoutedEventArgs e)
     {
@@ -77,7 +202,7 @@ public partial class MainWindow : Window
         {
             _pause.Resume();
             BtnPause.Content = "⏸ Пауза";
-            TxtProgress.Text = TxtProgress.Text.Replace(" [ПАУЗА]", "") + " [ПАУЗА]";
+            TxtProgress.Text = TxtProgress.Text.Replace(" [ПАУЗА]", "");
         }
         else
         {
@@ -90,10 +215,172 @@ public partial class MainWindow : Window
     private void BtnCancel_Click(object sender, RoutedEventArgs e)
     {
         _cts?.Cancel();
-        _pause?.Resume(); // unblock the read loop so cancellation propagates
+        _pause?.Resume();
     }
 
-    // ====================== Auto-update check ======================
+    // ═══════════════════════════ Launch ═══════════════════════════
+
+    private void GamesList_MouseDoubleClick(object sender, MouseButtonEventArgs e)
+    {
+        var g = Selected;
+        if (g != null && g.IsInstalled) LaunchGame(g);
+    }
+
+    private void LaunchGame(GameItem g)
+    {
+        if (g == null) return;
+        var dest = FullInstallPath(g);
+        if (!Directory.Exists(dest))
+        {
+            MessageBox.Show("Игра ещё не установлена. Сначала скачайте её.",
+                "Steam2 Лаунчер", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+        if (string.IsNullOrEmpty(g.ExePath) || !File.Exists(FullExePath(g)))
+        {
+            g.AutoFindExe(_installRoot);
+            if (string.IsNullOrEmpty(g.ExePath))
+            {
+                ChooseExe(g);
+                if (string.IsNullOrEmpty(g.ExePath)) return;
+            }
+        }
+        try
+        {
+            var fullExe = FullExePath(g);
+            var psi = new ProcessStartInfo
+            {
+                FileName = fullExe,
+                WorkingDirectory = Path.GetDirectoryName(fullExe),
+                UseShellExecute = true
+            };
+            if (!string.IsNullOrWhiteSpace(g.LaunchArgs)) psi.Arguments = g.LaunchArgs;
+            Process.Start(psi);
+            TxtStatus.Text = $"Запущено: {g.Name}";
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show("Не удалось запустить: " + ex.Message, "Ошибка",
+                MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+    }
+
+    private void ChooseExe(GameItem g)
+    {
+        var dest = FullInstallPath(g);
+        var dlg = new System.Windows.Forms.OpenFileDialog
+        {
+            Title = "Выберите исполняемый файл игры (.exe или .bat)",
+            InitialDirectory = Directory.Exists(dest) ? dest : AppInfo.BaseDir,
+            Filter = "Исполняемые файлы (*.exe;*.bat;*.cmd)|*.exe;*.bat;*.cmd|Все файлы (*.*)|*.*"
+        };
+        if (dlg.ShowDialog() == System.Windows.Forms.DialogResult.OK)
+        {
+            g.ExePath = Path.GetRelativePath(_installRoot, dlg.FileName);
+            if (g.ExePath.StartsWith("..")) g.ExePath = dlg.FileName;
+            SaveGames();
+            RefreshDetails();
+        }
+    }
+
+    // ═══════════════════════════ Main action button ═══════════════════════════
+
+    private void BtnMain_Click(object sender, RoutedEventArgs e)
+    {
+        var g = Selected;
+        if (g == null) return;
+        if (!g.IsInstalled)
+            BtnDownload_Click(sender, e);
+        else if (g.HasUpdates)
+            BtnUpdate_Click(sender, e);
+        else
+            LaunchGame(g);
+    }
+
+    // ═══════════════════════════ Verify integrity ═══════════════════════════
+
+    private void BtnVerify_Click(object sender, RoutedEventArgs e)
+    {
+        var g = Selected;
+        if (g == null || !g.IsInstalled) return;
+        var dir = FullInstallPath(g);
+        g.StatusText = "Проверка…";
+        TxtProgress.Text = $"Проверка целостности «{g.Name}»…";
+        Progress.IsIndeterminate = true;
+        Progress.Visibility = Visibility.Visible;
+        Task.Run(() => BuildUpdater.VerifyFiles(g.Name, dir)).ContinueWith(t =>
+        {
+            Dispatcher.Invoke(() =>
+            {
+                Progress.IsIndeterminate = false;
+                Progress.Visibility = Visibility.Collapsed;
+                TxtProgress.Text = "";
+                g.StatusText = t.IsFaulted ? "Ошибка проверки" : "Проверено ✓";
+                RefreshDetails();
+                var msg = t.IsFaulted ? "Ошибка: " + t.Exception?.InnerExceptions?.First()?.Message : t.Result;
+                var icon = t.IsFaulted ? MessageBoxImage.Error : MessageBoxImage.Information;
+                MessageBox.Show(msg, "Проверка целостности", MessageBoxButton.OK, icon);
+            });
+        });
+    }
+
+    // ═══════════════════════════ Uninstall ═══════════════════════════
+
+    private void BtnUninstall_Click(object sender, RoutedEventArgs e)
+    {
+        var g = Selected;
+        if (g == null || !g.IsInstalled) return;
+        var dir = FullInstallPath(g);
+
+        string sizeStr = "—";
+        try
+        {
+            var size = Directory.EnumerateFiles(dir, "*", SearchOption.AllDirectories)
+                .Sum(f => { try { return new FileInfo(f).Length; } catch { return 0L; } });
+            sizeStr = FormatBytes(size);
+        }
+        catch { }
+
+        var answer = MessageBox.Show(
+            $"Удалить «{g.Name}»?\n\nРазмер: {sizeStr}\nПапка: {dir}\n\nВсе файлы будут удалены безвозвратно.",
+            "Удаление игры", MessageBoxButton.YesNo, MessageBoxImage.Warning);
+        if (answer != MessageBoxResult.Yes) return;
+
+        try { if (Directory.Exists(dir)) Directory.Delete(dir, true); }
+        catch (Exception ex)
+        {
+            MessageBox.Show("Не удалось удалить: " + ex.Message, "Ошибка",
+                MessageBoxButton.OK, MessageBoxImage.Error);
+            return;
+        }
+
+        g.IsInstalled = false;
+        g.Status = GameStatus.NotDownloaded;
+        g.StatusText = "Не скачано";
+        g.InstallDir = "";
+        g.ExePath = "";
+        g.BaseVersion = 0;
+        g.InstalledVersion = 0;
+        SaveGames();
+        RefreshDetails();
+        UpdateButtonStates();
+        TxtStatus.Text = $"«{g.Name}» удалена.";
+    }
+
+    // ═══════════════════════════ Open folder ═══════════════════════════
+
+    private void BtnOpenFolder_Click(object sender, RoutedEventArgs e)
+    {
+        var g = Selected;
+        if (g == null || !g.IsInstalled) return;
+        var dir = FullInstallPath(g);
+        if (Directory.Exists(dir))
+            Process.Start(new ProcessStartInfo { FileName = dir, UseShellExecute = true });
+        else
+            MessageBox.Show("Папка не найдена.", "Steam2 Лаунчер", MessageBoxButton.OK, MessageBoxImage.Warning);
+    }
+
+    // ═══════════════════════════ Auto-update ═══════════════════════════
 
     private async Task CheckForUpdatesAsync()
     {
@@ -132,7 +419,7 @@ public partial class MainWindow : Window
                 Dispatcher.Invoke(() => ShowUpdateBanner(tag, htmlUrl));
             }
         }
-        catch { /* ignore: no internet / rate limit / etc. */ }
+        catch { /* no internet / rate limit */ }
     }
 
     private static bool IsNewer(string remote, string local)
@@ -154,20 +441,14 @@ public partial class MainWindow : Window
     {
         TxtUpdate.Text = $"Обновление {tag} доступно (у тебя {CurrentVersion}) — нажмите, чтобы обновить";
         TxtUpdate.Tag = url;
-        TxtUpdate.Visibility = Visibility.Visible;
-        TxtUpdate.Cursor = System.Windows.Input.Cursors.Hand;
+        UpdateBanner.Visibility = Visibility.Visible;
+        TxtUpdate.Cursor = Cursors.Hand;
         TxtUpdate.MouseLeftButtonUp -= TxtUpdate_Click;
         TxtUpdate.MouseLeftButtonUp += TxtUpdate_Click;
     }
 
-    private void TxtUpdate_Click(object sender, System.Windows.Input.MouseButtonEventArgs e)
-    {
-        _ = SelfUpdateAsync();
-    }
+    private void TxtUpdate_Click(object sender, MouseButtonEventArgs e) => _ = SelfUpdateAsync();
 
-    /// <summary>
-    /// Self-update: download new launcher zip, extract, write swap script, restart.
-    /// </summary>
     private async Task SelfUpdateAsync()
     {
         if (string.IsNullOrEmpty(LatestVersion) || string.IsNullOrEmpty(LatestAssetUrl))
@@ -198,6 +479,7 @@ public partial class MainWindow : Window
                 TxtProgress.Text = $"Обновление лаунчера: {p.Message}";
                 Progress.IsIndeterminate = false;
                 Progress.Value = p.Percent;
+                Progress.Visibility = Visibility.Visible;
             });
 
             var result = await _downloader.DownloadAsync(assetUrl, zipPath, progress, ct);
@@ -207,7 +489,6 @@ public partial class MainWindow : Window
             TxtUpdate.Text = $"Распаковка обновления {tag}…";
             Progress.IsIndeterminate = true;
 
-            // Extract zip: find the Steam2Launcher.exe inside
             var newExePath = "";
             using (var zip = ZipFile.OpenRead(zipPath))
             {
@@ -226,7 +507,6 @@ public partial class MainWindow : Window
             if (string.IsNullOrEmpty(newExePath) || !File.Exists(newExePath))
                 throw new Exception("В обновлении нет Steam2Launcher.exe");
 
-            // Write swap script
             var currentExe = Process.GetCurrentProcess().MainModule?.FileName
                 ?? Path.Combine(AppInfo.BaseDir, "Steam2Launcher.exe");
             var exeDir = Path.GetDirectoryName(currentExe) ?? AppInfo.BaseDir;
@@ -249,7 +529,6 @@ del ""%~f0""
             TxtUpdate.Text = $"Обновление готово! Перезапуск…";
             Progress.Value = 100;
 
-            // Launch swap script and exit
             Process.Start(new ProcessStartInfo
             {
                 FileName = "cmd.exe",
@@ -257,7 +536,6 @@ del ""%~f0""
                 UseShellExecute = true,
                 CreateNoWindow = true
             });
-
             Environment.Exit(0);
         }
         catch (OperationCanceledException)
@@ -280,7 +558,7 @@ del ""%~f0""
         }
     }
 
-    // ====================== Settings ======================
+    // ═══════════════════════════ Settings / Theme ═══════════════════════════
 
     private void LoadSettings()
     {
@@ -354,7 +632,7 @@ del ""%~f0""
             Source = new Uri(_theme == "Light" ? "ThemeLight.xaml" : "ThemeDark.xaml", UriKind.Relative)
         };
         appDicts.Add(dict);
-        BtnTheme.Content = _theme == "Light" ? "Тема: Светлая" : "Тема: Тёмная";
+        BtnTheme.Content = _theme == "Light" ? "Светлая" : "Тёмная";
     }
 
     private void BtnTheme_Click(object sender, RoutedEventArgs e)
@@ -365,7 +643,7 @@ del ""%~f0""
         Storage.SaveSettings(settings);
     }
 
-    // ====================== Game list ======================
+    // ═══════════════════════════ Game list ═══════════════════════════
 
     private void RescanPost()
     {
@@ -395,8 +673,7 @@ del ""%~f0""
                 var bi = BuildUpdater.ReadBuildInfo(full);
                 g.BaseVersion = bi.Base;
                 g.InstalledVersion = bi.Version;
-                if (g.HasUpdates)
-                    g.StatusText = $"v{bi.Version} ✓";
+                if (g.HasUpdates) g.StatusText = $"v{bi.Version} ✓";
             }
             if (installed && string.IsNullOrEmpty(g.ExePath))
             {
@@ -423,8 +700,7 @@ del ""%~f0""
         string full;
         if (!string.IsNullOrWhiteSpace(manualInstallDir))
         {
-            if (Path.IsPathRooted(manualInstallDir)) full = manualInstallDir;
-            else full = Path.Combine(_installRoot, manualInstallDir);
+            full = Path.IsPathRooted(manualInstallDir) ? manualInstallDir : Path.Combine(_installRoot, manualInstallDir);
         }
         else
         {
@@ -500,9 +776,24 @@ del ""%~f0""
         }
     }
 
-    private GameItem? Selected => GamesGrid.SelectedItem as GameItem;
+    private void BtnEdit_Click(object sender, RoutedEventArgs e)
+    {
+        var g = Selected;
+        if (g == null) return;
+        var dlg = new EditDialog(g.Name, g.Url, g.InstallDir, g.ExePath);
+        if (dlg.ShowDialog() == true)
+        {
+            g.Name = dlg.GameName;
+            g.Url = dlg.GameUrl;
+            g.InstallDir = dlg.GameInstallDir;
+            if (dlg.ExeChosen) g.ExePath = dlg.GameExePath;
+            SaveGames();
+            GamesList.Items.Refresh();
+            RefreshDetails();
+        }
+    }
 
-    // ====================== Install from base parts (download ALL, then extract ALL) ======================
+    // ═══════════════════════════ Install from base parts ═══════════════════════════
 
     private async Task InstallBaseFromRepoAsync(GameItem g)
     {
@@ -512,6 +803,7 @@ del ""%~f0""
         g.IsBusy = true;
         g.StatusText = "Поиск базы…";
         Progress.IsIndeterminate = true;
+        Progress.Visibility = Visibility.Visible;
         TxtProgress.Text = "Запрос частей базы…";
         UpdateButtonStates();
 
@@ -521,7 +813,6 @@ del ""%~f0""
         Directory.CreateDirectory(workDir);
         try
         {
-            // ---- Fetch manifest ----
             var (manifest, partUrls, error) = await BuildUpdater.FetchBasePartsAsync(g.Repo, ct);
             if (manifest == null || partUrls.Count == 0)
             {
@@ -530,7 +821,6 @@ del ""%~f0""
                 throw new Exception("База не найдена в репозитории обновлений.");
             }
 
-            // ---- Phase 1: probe sizes via HEAD ----
             TxtProgress.Text = "Определение размеров…";
             var sizes = new long[partUrls.Count];
             long totalBytes = 0;
@@ -538,14 +828,12 @@ del ""%~f0""
             {
                 ct.ThrowIfCancellationRequested();
                 _pause.Wait(ct);
-                var sz = await _downloader.GetFileSizeAsync(partUrls[i], ct);
-                sizes[i] = sz ?? 0;
+                sizes[i] = (await _downloader.GetFileSizeAsync(partUrls[i], ct)) ?? 0;
                 totalBytes += sizes[i];
             }
             var hasTotal = totalBytes > 0;
             long downloadedSoFar = 0;
 
-            // ---- Phase 2: download ALL parts ----
             var localParts = new List<string>();
             for (int i = 0; i < partUrls.Count; i++)
             {
@@ -576,6 +864,7 @@ del ""%~f0""
 
                     g.StatusText = $"Скачивание: {capturedIdx + 1}/{partUrls.Count}";
                     Progress.IsIndeterminate = false;
+                    Progress.Visibility = Visibility.Visible;
                     Progress.Value = Math.Min(pct, 100);
                     TxtProgress.Text = $"Часть {capturedIdx + 1}/{partUrls.Count}" +
                         $"  {FormatBytes(overallBytes)}{(hasTotal ? " / " + FormatBytes(totalBytes) : "")}" +
@@ -592,7 +881,6 @@ del ""%~f0""
                 downloadedSoFar += sizes[i] > 0 ? sizes[i] : new FileInfo(localPath).Length;
             }
 
-            // ---- Phase 3: extract ALL parts ----
             g.StatusText = "Распаковка…";
             Progress.IsIndeterminate = true;
 
@@ -610,12 +898,11 @@ del ""%~f0""
                     TxtProgress.Text = msg;
                 });
                 await ArchiveExtractor.ExtractAsync(partPath, dest, exProgress, ct, _pause);
-
                 try { File.Delete(partPath); } catch { }
             }
 
-            // ---- Phase 4: finalize ----
             BuildUpdater.WriteBuildInfo(dest, manifest.Base, manifest.Version);
+            try { BuildUpdater.WriteFileManifest(dest); } catch { }
             g.BaseVersion = manifest.Base;
             g.InstalledVersion = manifest.Version;
             g.InstallDir = Path.GetRelativePath(_installRoot, dest);
@@ -648,12 +935,13 @@ del ""%~f0""
             g.IsBusy = false;
             _pause = null;
             Progress.IsIndeterminate = false;
+            Progress.Visibility = Visibility.Collapsed;
             RefreshUpdateButton();
             try { Directory.Delete(workDir, true); } catch { }
         }
     }
 
-    // ====================== Delta update ======================
+    // ═══════════════════════════ Delta update ═══════════════════════════
 
     private async Task UpdateAsync(GameItem g)
     {
@@ -663,6 +951,7 @@ del ""%~f0""
         g.IsBusy = true;
         g.StatusText = "Проверка обновлений…";
         Progress.IsIndeterminate = true;
+        Progress.Visibility = Visibility.Visible;
         TxtProgress.Text = "Запрос к GitHub…";
         UpdateButtonStates();
 
@@ -701,13 +990,11 @@ del ""%~f0""
                 if (answer == MessageBoxResult.Yes)
                 {
                     await InstallBaseFromRepoAsync(g);
-                    if (g.InstalledVersion > 0)
-                        await UpdateAsync(g);
+                    if (g.InstalledVersion > 0) await UpdateAsync(g);
                 }
                 return;
             }
 
-            // Download delta zip
             var deltaName = Downloader.FileNameFromUrl(deltaUrl ?? "");
             if (string.IsNullOrEmpty(deltaName)) deltaName = "update.zip";
             var downloadPath = Path.Combine(Path.GetTempPath(), "steam2upd_" + Guid.NewGuid().ToString("N")[..8]
@@ -717,6 +1004,7 @@ del ""%~f0""
             var progress = new Progress<DownloadProgress>(p =>
             {
                 Progress.IsIndeterminate = false;
+                Progress.Visibility = Visibility.Visible;
                 Progress.Value = p.Percent;
                 TxtProgress.Text = $"Обновление: {p.Message}";
             });
@@ -724,7 +1012,6 @@ del ""%~f0""
             if (!result.Success)
                 throw new Exception("Ошибка загрузки обновления: " + result.Error);
 
-            // Extract over the install dir
             if (ArchiveExtractor.IsArchive(downloadPath, result.ContentType))
             {
                 g.StatusText = "Распаковка обновления…";
@@ -743,6 +1030,7 @@ del ""%~f0""
 
             BuildUpdater.ApplyRemoved(installDir, manifest.Removed);
             BuildUpdater.WriteBuildInfo(installDir, manifest.Base, manifest.Version);
+            try { BuildUpdater.WriteFileManifest(installDir); } catch { }
             g.BaseVersion = manifest.Base;
             g.InstalledVersion = manifest.Version;
             g.StatusText = $"v{manifest.Version} ✓";
@@ -767,6 +1055,7 @@ del ""%~f0""
             g.IsBusy = false;
             _pause = null;
             Progress.IsIndeterminate = false;
+            Progress.Visibility = Visibility.Collapsed;
             RefreshUpdateButton();
         }
     }
@@ -778,7 +1067,7 @@ del ""%~f0""
         _ = UpdateAsync(g);
     }
 
-    // ====================== SmartSteamEmu ======================
+    // ═══════════════════════════ SmartSteamEmu ═══════════════════════════
 
     private static bool IsEmulator(GameItem g) =>
         g.Name.Contains("SmartSteamEmu", StringComparison.OrdinalIgnoreCase)
@@ -833,7 +1122,7 @@ del ""%~f0""
             CopyDirectory(d, Path.Combine(dstDir, Path.GetFileName(d)));
     }
 
-    // ====================== Auth ======================
+    // ═══════════════════════════ Auth ═══════════════════════════
 
     private Task<string?> PromptCredentials(Downloader downloader, Uri uri, int tryIndex)
     {
@@ -859,7 +1148,7 @@ del ""%~f0""
         return Task.FromResult<string?>(joined);
     }
 
-    // ====================== Download / Launch ======================
+    // ═══════════════════════════ Download ═══════════════════════════
 
     private void BtnDownload_Click(object sender, RoutedEventArgs e)
     {
@@ -899,6 +1188,7 @@ del ""%~f0""
         g.IsBusy = true;
         g.StatusText = "Определение ссылки…";
         Progress.IsIndeterminate = true;
+        Progress.Visibility = Visibility.Visible;
         TxtProgress.Text = "Подключение…";
         UpdateButtonStates();
 
@@ -915,6 +1205,7 @@ del ""%~f0""
             {
                 g.StatusText = "Скачивание…";
                 Progress.IsIndeterminate = false;
+                Progress.Visibility = Visibility.Visible;
                 Progress.Value = p.Percent;
                 TxtProgress.Text = p.Message;
             });
@@ -957,6 +1248,7 @@ del ""%~f0""
                 g.InstalledVersion = 1;
                 g.StatusText = "v1 ✓";
             }
+            try { BuildUpdater.WriteFileManifest(dest); } catch { }
             SaveGames();
             TxtStatus.Text = $"Игра «{g.Name}» установлена в {dest}";
             Progress.Value = 100;
@@ -990,96 +1282,14 @@ del ""%~f0""
             g.IsBusy = false;
             _pause = null;
             Progress.IsIndeterminate = false;
+            Progress.Visibility = Visibility.Collapsed;
             RefreshUpdateButton();
         }
     }
 
-    private void BtnLaunch_Click(object sender, RoutedEventArgs e)
-    {
-        var g = Selected;
-        if (g == null)
-        {
-            MessageBox.Show("Выберите игру.", "Steam2 Лаунчер",
-                MessageBoxButton.OK, MessageBoxImage.Information);
-            return;
-        }
-        var dest = FullInstallPath(g);
-        if (!Directory.Exists(dest))
-        {
-            MessageBox.Show("Игра ещё не установлена. Сначала скачайте и распакуйте её.",
-                "Steam2 Лаунчер", MessageBoxButton.OK, MessageBoxImage.Warning);
-            return;
-        }
-        if (string.IsNullOrEmpty(g.ExePath) || !File.Exists(FullExePath(g)))
-        {
-            g.AutoFindExe(_installRoot);
-            if (string.IsNullOrEmpty(g.ExePath))
-            {
-                ChooseExe(g);
-                if (string.IsNullOrEmpty(g.ExePath)) return;
-            }
-        }
-        try
-        {
-            var fullExe = FullExePath(g);
-            var psi = new ProcessStartInfo
-            {
-                FileName = fullExe,
-                WorkingDirectory = Path.GetDirectoryName(fullExe),
-                UseShellExecute = true
-            };
-            if (!string.IsNullOrWhiteSpace(g.LaunchArgs))
-                psi.Arguments = g.LaunchArgs;
-            Process.Start(psi);
-            TxtStatus.Text = $"Запущено: {g.Name}" + (string.IsNullOrWhiteSpace(g.LaunchArgs) ? "" : " (" + g.LaunchArgs + ")");
-        }
-        catch (Exception ex)
-        {
-            MessageBox.Show("Не удалось запустить: " + ex.Message, "Ошибка",
-                MessageBoxButton.OK, MessageBoxImage.Error);
-        }
-    }
+    // ═══════════════════════════ Helpers ═══════════════════════════
 
-    private void ChooseExe(GameItem g)
-    {
-        var dest = FullInstallPath(g);
-        var dlg = new System.Windows.Forms.OpenFileDialog
-        {
-            Title = "Выберите исполняемый файл игры (.exe или .bat)",
-            InitialDirectory = Directory.Exists(dest) ? dest : AppInfo.BaseDir,
-            Filter = "Исполняемые файлы (*.exe;*.bat;*.cmd)|*.exe;*.bat;*.cmd|Все файлы (*.*)|*.*"
-        };
-        if (dlg.ShowDialog() == System.Windows.Forms.DialogResult.OK)
-        {
-            g.ExePath = Path.GetRelativePath(_installRoot, dlg.FileName);
-            if (g.ExePath.StartsWith("..")) g.ExePath = dlg.FileName;
-            SaveGames();
-        }
-    }
-
-    private void GamesGrid_MouseDoubleClick(object sender, MouseButtonEventArgs e)
-    {
-        if (Selected != null) BtnEdit_Click(sender, e);
-    }
-
-    private void BtnEdit_Click(object sender, RoutedEventArgs e)
-    {
-        var g = Selected;
-        if (g == null) return;
-        var dlg = new EditDialog(g.Name, g.Url, g.InstallDir, g.ExePath);
-        if (dlg.ShowDialog() == true)
-        {
-            g.Name = dlg.GameName;
-            g.Url = dlg.GameUrl;
-            g.InstallDir = dlg.GameInstallDir;
-            if (dlg.ExeChosen)
-                g.ExePath = dlg.GameExePath;
-            SaveGames();
-            GamesGrid.Items.Refresh();
-        }
-    }
-
-    // ====================== Helpers ======================
+    private void RefreshUpdateButton() => UpdateButtonStates();
 
     private static string FormatBytes(long b)
     {

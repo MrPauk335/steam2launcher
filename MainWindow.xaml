@@ -5,130 +5,328 @@
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         xmlns:local="clr-namespace:Steam2Launcher"
         mc:Ignorable="d"
-        Title="Steam2 Launcher" Height="640" Width="940"
+        Title="Steam2 Лаунчер" Height="720" Width="1100"
         WindowStartupLocation="CenterScreen"
-        MinWidth="760" MinHeight="480"
+        MinWidth="880" MinHeight="560"
         ResizeMode="CanResize"
         Background="{DynamicResource BgBrush}">
     <Window.Resources>
+        <!-- Base button style -->
         <Style TargetType="Button">
             <Setter Property="Background" Value="{DynamicResource AccentBrush}"/>
             <Setter Property="Foreground" Value="White"/>
-            <Setter Property="Padding" Value="12,4"/>
+            <Setter Property="Padding" Value="14,5"/>
             <Setter Property="FontWeight" Value="SemiBold"/>
-            <Setter Property="FontSize" Value="13"/>
+            <Setter Property="FontSize" Value="12.5"/>
             <Setter Property="Cursor" Value="Hand"/>
             <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="SnapsToDevicePixels" Value="True"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="Bd" Background="{TemplateBinding Background}"
+                                CornerRadius="6" Padding="{TemplateBinding Padding}">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Bd" Property="Opacity" Value="0.88"/>
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter TargetName="Bd" Property="Opacity" Value="0.45"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        <!-- Ghost button (toolbar) -->
+        <Style x:Key="GhostBtn" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="Foreground" Value="{DynamicResource SubFgBrush}"/>
+            <Setter Property="Padding" Value="10,5"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="Bd" Background="Transparent" CornerRadius="6"
+                                Padding="{TemplateBinding Padding}">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="#18FFFFFF"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        <!-- Danger button -->
+        <Style x:Key="DangerBtn" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
+            <Setter Property="Background" Value="{DynamicResource DangerBrush}"/>
+        </Style>
+        <!-- Green Play / Install button -->
+        <Style x:Key="PlayBtn" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
+            <Setter Property="Background" Value="{DynamicResource PlayBrush}"/>
+            <Setter Property="FontSize" Value="14"/>
+            <Setter Property="FontWeight" Value="Bold"/>
+            <Setter Property="Padding" Value="16,9"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="Bd" Background="{TemplateBinding Background}" CornerRadius="8"
+                                Padding="{TemplateBinding Padding}">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Bd" Property="Opacity" Value="0.85"/>
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter TargetName="Bd" Property="Opacity" Value="0.5"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        <!-- ListBoxItem tile style -->
+        <Style x:Key="TileListBoxItem" TargetType="ListBoxItem">
+            <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+            <Setter Property="Margin" Value="5"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ListBoxItem">
+                        <Border x:Name="Bd" Background="Transparent" CornerRadius="10"
+                                Padding="0" Margin="0" BorderThickness="2" BorderBrush="Transparent">
+                            <ContentPresenter/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Bd" Property="BorderBrush" Value="#30FFFFFF"/>
+                            </Trigger>
+                            <Trigger Property="IsSelected" Value="True">
+                                <Setter TargetName="Bd" Property="BorderBrush" Value="{DynamicResource AccentBrush}"/>
+                                <Setter TargetName="Bd" Property="Background" Value="#12FFFFFF"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
             <Style.Triggers>
-                <Trigger Property="IsMouseOver" Value="True">
-                    <Setter Property="Opacity" Value="0.9"/>
+                <Trigger Property="IsKeyboardFocusWithin" Value="True">
+                    <Setter Property="BorderBrush" Value="{DynamicResource AccentBrush}"/>
                 </Trigger>
             </Style.Triggers>
         </Style>
     </Window.Resources>
-    <Grid Margin="16">
+
+    <Grid>
         <Grid.RowDefinitions>
-            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="48"/>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="*"/>
-            <RowDefinition Height="Auto"/>
-            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="36"/>
         </Grid.RowDefinitions>
 
-        <!-- Top bar -->
-        <DockPanel Grid.Row="0" Margin="0,0,0,4">
-            <TextBlock x:Name="TxtStatus" Foreground="{DynamicResource SubFgBrush}"
-                       FontSize="13" VerticalAlignment="Center"/>
-            <Button x:Name="BtnTheme" Content="Тема: Тёмная" DockPanel.Dock="Right"
-                    Width="150" Height="30" Margin="8,0,0,0" Click="BtnTheme_Click"/>
-            <Button x:Name="BtnRescan" Content="Перечитать" DockPanel.Dock="Right"
-                    Width="90" Height="30" Margin="0,0,8,0" Click="BtnRescan_Click"/>
-        </DockPanel>
-        <TextBlock Grid.Row="1" x:Name="TxtUpdate" Visibility="Collapsed"
-                   HorizontalAlignment="Stretch" Margin="0,0,0,8"
-                   Padding="10,6" Background="#1f2937" Foreground="#facc15"
-                   FontSize="13" FontWeight="SemiBold"
-                   TextAlignment="Center"/>
-
-        <!-- Games list -->
-        <DataGrid Grid.Row="2" x:Name="GamesGrid"
-                  AutoGenerateColumns="False"
-                  IsReadOnly="True"
-                  SelectionMode="Single"
-                  CanUserAddRows="False"
-                  HeadersVisibility="Column"
-                  Background="{DynamicResource PanelBrush}"
-                  Foreground="{DynamicResource FgBrush}"
-                  BorderBrush="{DynamicResource BorderBrush}"
-                  BorderThickness="1"
-                  RowHeight="34"
-                  FontSize="13"
-                  ColumnHeaderHeight="34"
-                  GridLinesVisibility="Horizontal"
-                  MouseDoubleClick="GamesGrid_MouseDoubleClick"
-                  SelectionChanged="GamesGrid_SelectionChanged">
-            <DataGrid.Resources>
-                <Style TargetType="DataGridColumnHeader">
-                    <Setter Property="Background" Value="{DynamicResource PanelBrush}"/>
-                    <Setter Property="Foreground" Value="{DynamicResource SubFgBrush}"/>
-                    <Setter Property="FontWeight" Value="SemiBold"/>
-                    <Setter Property="Padding" Value="8,0,8,0"/>
-                </Style>
-                <Style TargetType="DataGridRow">
-                    <Setter Property="Background" Value="Transparent"/>
-                    <Style.Triggers>
-                        <Trigger Property="IsSelected" Value="True">
-                            <Setter Property="Background" Value="{DynamicResource AccentBrush}"/>
-                            <Setter Property="Foreground" Value="White"/>
-                        </Trigger>
-                    </Style.Triggers>
-                </Style>
-            </DataGrid.Resources>
-            <DataGrid.Columns>
-                <DataGridTextColumn Header="Игра" Binding="{Binding Name}" Width="2*"/>
-                <DataGridTextColumn Header="Описание" Binding="{Binding Description}" Width="3*"/>
-                <DataGridTextColumn Header="Статус" Binding="{Binding StatusText}" Width="1*"/>
-            </DataGrid.Columns>
-        </DataGrid>
-
-        <!-- Install folder + actions -->
-        <DockPanel Grid.Row="3" Margin="0,12,0,0" LastChildFill="True">
-            <Button x:Name="BtnEdit" Content="Свойства" DockPanel.Dock="Right"
-                    Width="90" Height="34" Margin="8,0,0,0" Click="BtnEdit_Click"/>
-            <Button x:Name="BtnLaunch" Content="Запустить" DockPanel.Dock="Right"
-                    Width="90" Height="34" Margin="8,0,0,0" Click="BtnLaunch_Click"/>
-            <Button x:Name="BtnCancel" Content="Отмена" DockPanel.Dock="Right"
-                    Width="70" Height="34" Margin="8,0,0,0" Click="BtnCancel_Click"
-                    IsEnabled="False" Background="#FFE05555"/>
-            <Button x:Name="BtnPause" DockPanel.Dock="Right"
-                    Width="90" Height="34" Margin="8,0,0,0" Click="BtnPause_Click"
-                    IsEnabled="False"/>
-            <Button x:Name="BtnUpdate" Content="Обновить" DockPanel.Dock="Right"
-                    Width="90" Height="34" Margin="8,0,0,0" Click="BtnUpdate_Click" IsEnabled="False"/>
-            <Button x:Name="BtnDownload" Content="Скачать" DockPanel.Dock="Right"
-                    Width="90" Height="34" Margin="8,0,0,0" Click="BtnDownload_Click"/>
-            <TextBlock DockPanel.Dock="Left" Text="Папка:" VerticalAlignment="Center"
-                       Foreground="{DynamicResource SubFgBrush}" Margin="0,0,8,0"/>
-            <Button x:Name="BtnBrowse" Content="Обзор" DockPanel.Dock="Right"
-                    Width="80" Height="30" Margin="8,0,8,0" VerticalAlignment="Center" Click="BtnBrowse_Click"/>
-            <TextBox x:Name="TxtInstallRoot" Height="30" IsReadOnly="True"
-                     VerticalContentAlignment="Center" Padding="6,0"
-                     Background="{DynamicResource PanelBrush}"
-                     Foreground="{DynamicResource FgBrush}"
-                     BorderBrush="{DynamicResource BorderBrush}"/>
+        <!-- ===== TOP BAR ===== -->
+        <DockPanel Grid.Row="0" Background="{DynamicResource PanelBrush}"
+                   Margin="0,0,0,0" LastChildFill="False">
+            <StackPanel DockPanel.Dock="Left" Orientation="Horizontal" Margin="16,0,0,0"
+                        VerticalAlignment="Center">
+                <TextBlock Text="STEAM2" Foreground="{DynamicResource AccentBrush}"
+                           FontWeight="Bold" FontSize="16" VerticalAlignment="Center"/>
+                <TextBlock Text="  ЛАУНЧЕР" Foreground="{DynamicResource SubFgBrush}"
+                           FontWeight="SemiBold" FontSize="15" VerticalAlignment="Center" Margin="0"/>
+                <TextBlock x:Name="TxtStatus" Foreground="{DynamicResource SubFgBrush}" FontSize="11"
+                           VerticalAlignment="Center" Margin="18,0,0,0"/>
+            </StackPanel>
+            <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Margin="0,0,12,0"
+                        VerticalAlignment="Center">
+                <Button x:Name="BtnTheme" Content="Тёмная" Width="72" Height="28"
+                        Style="{StaticResource GhostBtn}" Click="BtnTheme_Click"/>
+                <Button x:Name="BtnRescan" Content="⟳" Width="34" Height="28"
+                        Style="{StaticResource GhostBtn}" Click="BtnRescan_Click"/>
+                <Button x:Name="BtnBrowse" Content="Папка…" Width="84" Height="28"
+                        Style="{StaticResource GhostBtn}" Click="BtnBrowse_Click"/>
+            </StackPanel>
+            <TextBlock x:Name="TxtInstallRoot" Foreground="{DynamicResource SubFgBrush}" FontSize="10.5"
+                       VerticalAlignment="Center" Margin="16,0,0,0"
+                       TextTrimming="CharacterEllipsis" MaxWidth="260" ToolTip="{Binding Text, RelativeSource={RelativeSource Self}}"/>
         </DockPanel>
 
-        <!-- Progress row -->
-        <Grid Grid.Row="4" Margin="0,8,0,0">
+        <!-- ===== UPDATE BANNER ===== -->
+        <Border Grid.Row="1" x:Name="UpdateBanner" Visibility="Collapsed"
+                Background="#F59E0B" CornerRadius="0" Padding="0">
+            <TextBlock x:Name="TxtUpdate" TextAlignment="Center" Padding="10,5"
+                       Foreground="#000" FontSize="12.5" FontWeight="SemiBold"
+                       Cursor="Hand" MouseLeftButtonUp="TxtUpdate_Click"/>
+        </Border>
+
+        <!-- ===== MAIN CONTENT ===== -->
+        <Grid Grid.Row="2" Margin="10,8,10,6">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="*"/>
                 <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="360"/>
             </Grid.ColumnDefinitions>
-            <ProgressBar x:Name="Progress" Height="22" Minimum="0" Maximum="100"
-                         Visibility="Collapsed" VerticalAlignment="Center"/>
-            <TextBlock Grid.Column="1" x:Name="TxtProgress" Foreground="{DynamicResource SubFgBrush}"
-                       VerticalAlignment="Center" FontSize="12" Margin="10,0,0,0"
-                       MinWidth="200" TextWrapping="NoWrap"/>
+
+            <!-- Library grid (tiles) -->
+            <Border Grid.Column="0" Background="{DynamicResource PanelBrush}"
+                    CornerRadius="10" BorderThickness="1"
+                    BorderBrush="{DynamicResource BorderBrush}">
+                <Grid>
+                    <TextBlock Text="Библиотека" Foreground="{DynamicResource SubFgBrush}"
+                               FontSize="13" FontWeight="SemiBold" Margin="14,10,0,0"
+                               VerticalAlignment="Top"/>
+                    <ListBox x:Name="GamesList" Margin="6,32,6,6"
+                             Background="Transparent" BorderThickness="0"
+                             ItemsSource="{Binding}"
+                             ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                             ScrollViewer.VerticalScrollBarVisibility="Auto"
+                             SelectionMode="Single"
+                             PreviewMouseRightButtonDown="GamesList_PreviewMouseRightButtonDown"
+                             SelectionChanged="GamesList_SelectionChanged"
+                             MouseDoubleClick="GamesList_MouseDoubleClick"
+                             ItemContainerStyle="{StaticResource TileListBoxItem}">
+                        <ListBox.ItemsPanel>
+                            <ItemsPanelTemplate>
+                                <WrapPanel/>
+                            </ItemsPanelTemplate>
+                        </ListBox.ItemsPanel>
+                        <ListBox.ItemTemplate>
+                            <DataTemplate>
+                                <Border Width="160" Height="180" CornerRadius="10"
+                                        Background="#00000000" ClipToBounds="True">
+                                    <Grid>
+                                        <Grid.RowDefinitions>
+                                            <RowDefinition Height="100"/>
+                                            <RowDefinition Height="*"/>
+                                        </Grid.RowDefinitions>
+                                        <!-- Hero header -->
+                                        <Border Grid.Row="0" CornerRadius="10,10,0,0"
+                                                Background="{DynamicResource TileBrush}">
+                                            <TextBlock Text="{Binding CardLetter}" FontSize="42"
+                                                       FontWeight="Bold" Foreground="#AAFFFFFF"
+                                                       HorizontalAlignment="Center" VerticalAlignment="Center"
+                                                       Opacity="0.8"/>
+                                        </Border>
+                                        <!-- Status dot top right -->
+                                        <Ellipse Width="9" Height="9" Margin="0,8,10,0"
+                                                 HorizontalAlignment="Right" VerticalAlignment="Top"
+                                                 Fill="{Binding StatusBrush}"/>
+                                        <!-- Name + status -->
+                                        <StackPanel Grid.Row="1" Margin="10,8,10,8"
+                                                    VerticalAlignment="Top">
+                                            <TextBlock Text="{Binding Name}" FontSize="12.5"
+                                                       FontWeight="SemiBold" Foreground="{DynamicResource FgBrush}"
+                                                       TextWrapping="NoWrap" TextTrimming="CharacterEllipsis"/>
+                                            <TextBlock Text="{Binding StatusText}" FontSize="10"
+                                                       Foreground="{DynamicResource SubFgBrush}"
+                                                       Margin="0,3,0,0" TextTrimming="CharacterEllipsis"/>
+                                        </StackPanel>
+                                    </Grid>
+                                </Border>
+                            </DataTemplate>
+                        </ListBox.ItemTemplate>
+                    </ListBox>
+                </Grid>
+            </Border>
+
+            <GridSplitter Grid.Column="1" Width="4" Background="Transparent"/>
+
+            <!-- ===== DETAILS PANEL ===== -->
+            <Border Grid.Column="2" Background="{DynamicResource PanelBrush}"
+                    CornerRadius="10" Margin="10,0,0,0" Padding="0"
+                    BorderThickness="1" BorderBrush="{DynamicResource BorderBrush}">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="*"/>
+                        <RowDefinition Height="Auto"/>
+                    </Grid.RowDefinitions>
+
+                    <!-- Hero tile -->
+                    <Border x:Name="TileHero" Grid.Row="0" Height="110"
+                            CornerRadius="10,10,0,0" ClipToBounds="True"
+                            Background="{DynamicResource TileBrush}">
+                        <Grid>
+                            <Ellipse Width="9" Height="9" Margin="0,8,12,0"
+                                     HorizontalAlignment="Right" VerticalAlignment="Top"
+                                     x:Name="HeroDot"/>
+                            <StackPanel VerticalAlignment="Bottom" Margin="16,0,0,10">
+                                <TextBlock x:Name="LitName" Text="Выберите игру"
+                                           FontSize="19" FontWeight="Bold" Foreground="White"/>
+                                <TextBlock x:Name="LitStatus" Text="" FontSize="11"
+                                           Foreground="#CCFFFFFF" Margin="0,2,0,0"/>
+                            </StackPanel>
+                        </Grid>
+                    </Border>
+
+                    <!-- Description -->
+                    <TextBlock x:Name="LitDesc" Grid.Row="1"
+                               FontSize="11.5" Foreground="{DynamicResource SubFgBrush}"
+                               TextWrapping="Wrap" TextTrimming="CharacterEllipsis"
+                               MaxHeight="60" Margin="16,10,16,0"/>
+
+                    <!-- Separator -->
+                    <Separator Grid.Row="2" Margin="16,8,16,0"
+                               Background="{DynamicResource BorderBrush}"/>
+
+                    <!-- Primary action button -->
+                    <Button x:Name="BtnMain" Grid.Row="3" Content="Скачать"
+                            Style="{StaticResource PlayBtn}"
+                            Height="44" Margin="16,10,16,0"
+                            Click="BtnMain_Click"/>
+
+                    <!-- Secondary buttons row -->
+                    <WrapPanel Grid.Row="4" Margin="16,10,16,0" HorizontalAlignment="Left">
+                        <Button x:Name="BtnVerify" Content="Проверить целостность"
+                                Style="{StaticResource GhostBtn}"
+                                Height="28" Margin="0,0,6,6" Click="BtnVerify_Click"/>
+                        <Button x:Name="BtnUninstall" Content="Удалить"
+                                Style="{StaticResource DangerBtn}"
+                                Height="28" Margin="0,0,6,6" Click="BtnUninstall_Click"/>
+                        <Button x:Name="BtnOpenFolder" Content="Папка"
+                                Style="{StaticResource GhostBtn}"
+                                Height="28" Margin="0,0,6,6" Click="BtnOpenFolder_Click"/>
+                        <Button x:Name="BtnEdit" Content="Свойства"
+                                Style="{StaticResource GhostBtn}"
+                                Height="28" Margin="0,0,0,6" Click="BtnEdit_Click"/>
+                    </WrapPanel>
+
+                    <!-- Meta info -->
+                    <TextBlock x:Name="LitMeta" Grid.Row="5"
+                               FontSize="10.5" Foreground="{DynamicResource SubFgBrush}"
+                               TextWrapping="Wrap" Margin="16,8,16,0" LineHeight="16"/>
+                </Grid>
+            </Border>
         </Grid>
+
+        <!-- ===== PROGRESS BAR ===== -->
+        <DockPanel Grid.Row="3" Background="{DynamicResource PanelBrush}"
+                   LastChildFill="True">
+            <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Margin="8,0,10,0"
+                        VerticalAlignment="Center">
+                <Button x:Name="BtnPause" Content="⏸ Пауза" Width="90" Height="24"
+                        Style="{StaticResource GhostBtn}" Click="BtnPause_Click"
+                        IsEnabled="False" FontSize="11.5"/>
+                <Button x:Name="BtnCancel" Content="Отмена" Width="70" Height="24"
+                        Style="{StaticResource DangerBtn}" Click="BtnCancel_Click"
+                        IsEnabled="False" Margin="6,0,0,0" FontSize="11.5"/>
+            </StackPanel>
+            <ProgressBar x:Name="Progress" Height="6" Minimum="0" Maximum="100"
+                         Visibility="Collapsed" VerticalAlignment="Center"
+                         Margin="10,0,0,0" Background="{DynamicResource BorderBrush}"
+                         Foreground="{DynamicResource AccentBrush}"
+                         Opacity="0.85"/>
+            <TextBlock x:Name="TxtProgress" DockPanel.Dock="Left"
+                       Foreground="{DynamicResource SubFgBrush}" FontSize="11"
+                       VerticalAlignment="Center" Margin="12,0,0,0"
+                       MinWidth="180" TextWrapping="NoWrap"/>
+        </DockPanel>
     </Grid>
 </Window>

@@ -2,11 +2,18 @@
                     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
                     xmlns:sys="clr-namespace:System;assembly=mscorlib">
     <sys:String x:Key="ThemeName">Light</sys:String>
-    <SolidColorBrush x:Key="BgBrush" Color="#F5F6F8"/>
+    <SolidColorBrush x:Key="BgBrush" Color="#EEF1F5"/>
     <SolidColorBrush x:Key="PanelBrush" Color="#FFFFFF"/>
     <SolidColorBrush x:Key="FgBrush" Color="#1E1E1E"/>
     <SolidColorBrush x:Key="SubFgBrush" Color="#6B7280"/>
     <SolidColorBrush x:Key="AccentBrush" Color="#2563EB"/>
-    <SolidColorBrush x:Key="BorderBrush" Color="#E5E7EB"/>
+    <SolidColorBrush x:Key="AccentDarkBrush" Color="#1D4ED8"/>
+    <SolidColorBrush x:Key="BorderBrush" Color="#DDE1E7"/>
     <SolidColorBrush x:Key="SuccessBrush" Color="#2E9E5B"/>
+    <SolidColorBrush x:Key="PlayBrush" Color="#4F8A23"/>
+    <SolidColorBrush x:Key="DangerBrush" Color="#C2403C"/>
+    <LinearGradientBrush x:Key="TileBrush" StartPoint="0,0" EndPoint="0,1">
+        <GradientStop Color="#3B82F6" Offset="0"/>
+        <GradientStop Color="#1E3A8A" Offset="1"/>
+    </LinearGradientBrush>
 </ResourceDictionary>

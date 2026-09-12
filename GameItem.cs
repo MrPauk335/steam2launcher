@@ -90,6 +90,23 @@ public class GameItem : INotifyPropertyChanged
     public string ExeName =>
         string.IsNullOrEmpty(_exePath) ? "" : Path.GetFileName(_exePath.Replace('\\', '/'));
 
+    public string CardLetter =>
+        string.IsNullOrWhiteSpace(_name) ? "?" : _name.Trim()[..1].ToUpperInvariant();
+
+    public System.Windows.Media.Brush StatusBrush
+    {
+        get
+        {
+            try
+            {
+                var c = new System.Windows.Media.BrushConverter();
+                return c.ConvertFromString(StatusColour) as System.Windows.Media.Brush ?? System.Windows.Media.Brushes.Gray;
+            }
+            catch { }
+            return System.Windows.Media.Brushes.Gray;
+        }
+    }
+
     public string StatusColour =>
         _status == GameStatus.Downloaded ? "#FF57C78D"
         : _status == GameStatus.Error ? "#FFE05555" : "#FFFFC94D";

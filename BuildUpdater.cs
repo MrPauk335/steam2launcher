@@ -33,6 +33,13 @@ public class BuildManifest
     public string Tag { get; set; } = "";
 }
 
+/// <summary>One entry of the per-install filelist.json integrity manifest.</summary>
+public class FileEntry
+{
+    public string Path { get; set; } = "";
+    public long Size { get; set; }
+}
+
 /// <summary>
 /// Fetches and applies incremental updates published as GitHub releases on a per-game repo.
 /// Release layout (see publish.ps1):
@@ -74,6 +81,107 @@ public static class BuildUpdater
                 JsonSerializer.Serialize(info));
         }
         catch { }
+    }
+
+    private const string FileManifestName = "filelist.json";
+
+    /// <summary>
+    /// Writes filelist.json with relative path -> size for every file. Used by the
+    /// integrity check to detect missing/corrupted files. Written after install/update.
+    /// </summary>
+    public static void WriteFileManifest(string installDir)
+    {
+        if (string.IsNullOrWhiteSpace(installDir) || !Directory.Exists(installDir)) return;
+        var entries = new List<FileEntry>();
+        foreach (var f in Directory.EnumerateFiles(installDir, "*", SearchOption.AllDirectories))
+        {
+            try
+            {
+                entries.Add(new FileEntry
+                {
+                    Path = Path.GetRelativePath(installDir, f),
+                    Size = new FileInfo(f).Length
+                });
+            }
+            catch { }
+        }
+        File.WriteAllText(Path.Combine(installDir, FileManifestName),
+            JsonSerializer.Serialize(entries));
+    }
+
+    /// <summary>
+    /// Verifies the install dir against its filelist.json. Returns a human-readable
+    /// report; throws if the manifest is missing so the UI can prompt a reinstall.
+    /// </summary>
+    public static string VerifyFiles(string gameName, string installDir)
+    {
+        var manifestPath = Path.Combine(installDir, FileManifestName);
+        if (!File.Exists(manifestPath))
+            throw new Exception("Нет контрольного файла filelist.json. Переустановите игру, чтобы лаунчер создал его автоматически.");
+
+        List<FileEntry> entries;
+        try
+        {
+            entries = JsonSerializer.Deserialize<List<FileEntry>>(File.ReadAllText(manifestPath)) ?? new();
+        }
+        catch (Exception ex)
+        {
+            throw new Exception("Не удалось прочитать filelist.json: " + ex.Message);
+        }
+
+        var expected = entries
+            .Where(x => !string.IsNullOrWhiteSpace(x.Path))
+            .ToDictionary(x => x.Path, x => x.Size, StringComparer.OrdinalIgnoreCase);
+
+        long okBytes = 0;
+        int ok = 0, missing = 0, mismatch = 0, extra = 0;
+        long checkedFiles = 0;
+
+        foreach (var f in Directory.EnumerateFiles(installDir, "*", SearchOption.AllDirectories))
+        {
+            var rel = Path.GetRelativePath(installDir, f);
+            if (expected.TryGetValue(rel, out var expSize))
+            {
+                checkedFiles++;
+                long actual;
+                try { actual = new FileInfo(f).Length; }
+                catch { actual = -1; }
+                if (actual == expSize) { ok++; okBytes += actual; }
+                else mismatch++;
+            }
+            else if (!rel.Equals(FileManifestName, StringComparison.OrdinalIgnoreCase))
+                extra++;
+        }
+
+        foreach (var kv in expected)
+        {
+            if (!File.Exists(Path.Combine(installDir, kv.Key))) missing++;
+        }
+
+        var result = new List<string>();
+        result.Add($"«{gameName}» — {FormatBytes(okBytes)} в {ok} файлах, проверено {checkedFiles} из {expected.Count}.");
+        if (missing > 0 || mismatch > 0)
+        {
+            result.Add("");
+            result.Add(missing > 0 ? "Не найдено файлов: " + missing : "");
+            result.Add(mismatch > 0 ? "Размер не совпадает: " + mismatch : "");
+            result.Add($"Файлы повреждены или отсутствуют. Переустановите игру или обновите её.");
+        }
+        else
+        {
+            result.Add("");
+            if (extra > 0) result.Add($"Лишних файлов (созданных игрой): {extra}");
+            result.Add("Целостность подтверждена ✓");
+        }
+        return string.Join(Environment.NewLine, result);
+    }
+
+    private static string FormatBytes(long b)
+    {
+        if (b >= 1073741824) return $"{b / 1073741824.0:0.00} ГБ";
+        if (b >= 1048576) return $"{b / 1048576.0:0.0} МБ";
+        if (b >= 1024) return $"{b / 1024.0:0.0} КБ";
+        return $"{b} Б";
     }
 
     /// <summary>True when the remote release is newer than the installed build.</summary>
