@@ -8,11 +8,17 @@ namespace Steam2Launcher;
 /// <summary>GitHub release manifest for incremental game updates (delta patches).</summary>
 public class BuildManifest
 {
+    public string Kind { get; set; } = "delta";
     public string Name { get; set; } = "";
     public int Base { get; set; }
     public int Version { get; set; }
     public string Delta { get; set; } = "";
     public List<string> Removed { get; set; } = new();
+
+    /// <summary>Part file names for base releases (kind = "base"), in order.</summary>
+    public List<string> Parts { get; set; } = new();
+
+    public string Tag { get; set; } = "";
 }
 
 /// <summary>
@@ -67,6 +73,91 @@ public static class BuildUpdater
     }
 
     /// <summary>
+    /// Fetches the latest BASE release parts (kind="base") for owner/repo: the freshly
+    /// installed full build. Returns the ordered part download URLs + resolved manifest.
+    /// </summary>
+    public static async Task<(BuildManifest? Manifest, List<string> PartUrls, string? Error)>
+        FetchBasePartsAsync(string repo, CancellationToken ct)
+    {
+        try
+        {
+            using var http = MakeHttp();
+            var url = $"https://api.github.com/repos/{repo}/releases?per_page=30";
+            using var resp = await http.GetAsync(url, ct);
+            if (!resp.IsSuccessStatusCode)
+                return (null, new(), $"GitHub ответил HTTP {(int)resp.StatusCode}");
+            var json = await resp.Content.ReadAsStringAsync(ct);
+            using var doc = JsonDocument.Parse(json);
+            List<(string Tag, string ManifestUrl)> candidates = new();
+            foreach (var rel in doc.RootElement.EnumerateArray())
+            {
+                var tag = rel.TryGetProperty("tag_name", out var tg) ? tg.GetString() : null;
+                string? mUrl = null;
+                if (rel.TryGetProperty("assets", out var assets))
+                {
+                    foreach (var a in assets.EnumerateArray())
+                    {
+                        var name = a.TryGetProperty("name", out var n) ? n.GetString() : "";
+                        var bUrl = a.TryGetProperty("browser_download_url", out var bu) ? bu.GetString() : null;
+                        if (name == "manifest.json" && bUrl != null) mUrl = bUrl;
+                    }
+                }
+                if (mUrl != null) candidates.Add((tag ?? "", mUrl));
+            }
+            if (candidates.Count == 0)
+                return (null, new(), "Нет релизов с manifest.json");
+
+            // newest-first, take the first base-kind release
+            foreach (var (tag, manifestUrl) in candidates)
+            {
+                var manifestText = await http.GetStringAsync(manifestUrl, ct);
+                BuildManifest? m;
+                try { m = JsonSerializer.Deserialize<BuildManifest>(manifestText); }
+                catch { m = null; }
+                if (m == null || m.Kind != "base") continue;
+
+                m.Tag = tag;
+                var partUrls = new List<string>();
+                using var mdoc = JsonDocument.Parse(manifestText);
+                if (m.Parts.Count > 0)
+                {
+                    // map part names -> browser urls from the same release's assets
+                    var assets = new List<(string Name, string Url)>();
+                    var relUrl = $"https://api.github.com/repos/{repo}/releases/tags/{tag}";
+                    using var relResp = await http.GetAsync(relUrl, ct);
+                    if (relResp.IsSuccessStatusCode)
+                    {
+                        var relJson = await relResp.Content.ReadAsStringAsync(ct);
+                        using var rdoc = JsonDocument.Parse(relJson);
+                        if (rdoc.RootElement.TryGetProperty("assets", out var ra))
+                        {
+                            foreach (var a in ra.EnumerateArray())
+                            {
+                                var nm = a.TryGetProperty("name", out var nn) ? nn.GetString() : "";
+                                var bu = a.TryGetProperty("browser_download_url", out var bb) ? bb.GetString() : null;
+                                if (nm != null && bu != null) assets.Add((nm, bu));
+                            }
+                        }
+                    }
+                    foreach (var p in m.Parts)
+                    {
+                        var found = assets.FirstOrDefault(x => x.Name == p);
+                        if (found.Name != null) partUrls.Add(found.Url);
+                    }
+                }
+                if (partUrls.Count != m.Parts.Count)
+                    return (null, new(), $"Не найдены все части базы ({partUrls.Count}/{m.Parts.Count})");
+                return (m, partUrls, null);
+            }
+            return (null, new(), "В релизах нет базы (manifest kind=base)");
+        }
+        catch (Exception ex)
+        {
+            return (null, new(), ex.Message);
+        }
+    }
+
+    /// <summary>
     /// Fetches the latest release manifest for owner/repo and resolves the delta asset URL.
     /// Returns null if the repo has no release with a manifest.json asset.
     /// </summary>
@@ -96,7 +187,9 @@ public static class BuildUpdater
                     var bUrl = a.TryGetProperty("browser_download_url", out var bu) ? bu.GetString() : null;
                     if (string.IsNullOrEmpty(name) || string.IsNullOrEmpty(bUrl)) continue;
                     if (name.Equals("manifest.json", StringComparison.OrdinalIgnoreCase))
+                    {
                         manifestUrl = bUrl;
+                    }
                     else if (name.EndsWith(".zip", StringComparison.OrdinalIgnoreCase))
                         deltaUrl ??= bUrl;
                 }

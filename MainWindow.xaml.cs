@@ -10,7 +10,7 @@ namespace Steam2Launcher;
 
 public partial class MainWindow : Window
 {
-    public const string CurrentVersion = "v1.3.0";
+    public const string CurrentVersion = "v1.3.1";
     public const string UpdateRepo = "MrPauk335/steam2launcher";
 
     private readonly Downloader _downloader = new();
@@ -350,6 +350,110 @@ public partial class MainWindow : Window
         _ = UpdateAsync(g);
     }
 
+    /// <summary>
+    /// Full base install from GitHub parts (game has Repo but nothing installed yet).
+    /// Downloads every fstop_part_XX.zip from the latest base release and extracts them.
+    /// </summary>
+    private async Task InstallBaseFromRepoAsync(GameItem g)
+    {
+        _cts = new CancellationTokenSource();
+        var ct = _cts.Token;
+        g.IsBusy = true;
+        g.StatusText = "Поиск базы…";
+        Progress.IsIndeterminate = true;
+        TxtProgress.Text = "Запрос частей базы…";
+
+        var dest = FullInstallPath(g);
+        Directory.CreateDirectory(dest);
+        try
+        {
+            var (manifest, partUrls, error) = await BuildUpdater.FetchBasePartsAsync(g.Repo, ct);
+            if (manifest == null || partUrls.Count == 0)
+            {
+                if (!string.IsNullOrEmpty(error))
+                    throw new Exception("Не удалось получить базу:\n" + error);
+                throw new Exception("База не найдена в репозитории обновлений.");
+            }
+
+            for (var i = 0; i < partUrls.Count; i++)
+            {
+                ct.ThrowIfCancellationRequested();
+                var partUrl = partUrls[i];
+                var fileName = Downloader.FileNameFromUrl(partUrl);
+                if (string.IsNullOrEmpty(fileName)) fileName = $"part_{i + 1}.zip";
+                var downloadPath = Path.Combine(Path.GetTempPath(),
+                    "steam2base_" + Guid.NewGuid().ToString("N")[..8] + "_" + GameEntry.Sanitize(fileName));
+
+                g.StatusText = $"Скачивание {i + 1}/{partUrls.Count}…";
+                Progress.IsIndeterminate = true;
+                TxtProgress.Text = $"Часть {i + 1} из {partUrls.Count} ({fileName})";
+
+                var progress = new Progress<DownloadProgress>(p =>
+                {
+                    g.StatusText = $"Часть {i + 1}/{partUrls.Count}";
+                    Progress.IsIndeterminate = false;
+                    Progress.Value = p.Percent;
+                    TxtProgress.Text = p.Message;
+                });
+
+                var result = await _downloader.DownloadAsync(partUrl, downloadPath, progress, ct, PromptCredentials);
+                if (!result.Success)
+                    throw new Exception($"Ошибка загрузки части {i + 1}: {result.Error}");
+
+                if (ArchiveExtractor.IsArchive(downloadPath, result.ContentType))
+                {
+                    var exProgress = new Progress<string>(msg =>
+                    {
+                        g.StatusText = msg;
+                        Progress.IsIndeterminate = true;
+                        TxtProgress.Text = msg;
+                    });
+                    await ArchiveExtractor.ExtractAsync(downloadPath, dest, exProgress, ct);
+                }
+                else
+                {
+                    File.Move(downloadPath, Path.Combine(dest, Path.GetFileName(downloadPath)), true);
+                }
+
+                try { File.Delete(downloadPath); } catch { }
+            }
+
+            BuildUpdater.WriteBuildInfo(dest, manifest.Base, manifest.Version);
+            g.BaseVersion = manifest.Base;
+            g.InstalledVersion = manifest.Version;
+            g.InstallDir = Path.GetRelativePath(_installRoot, dest);
+            if (g.InstallDir.StartsWith("..")) g.InstallDir = dest;
+            g.Status = GameStatus.Downloaded;
+            g.StatusText = $"v{manifest.Version} ✓";
+            g.IsInstalled = true;
+            g.AutoFindExe(_installRoot);
+            if (string.IsNullOrEmpty(g.LaunchArgs)) g.AutoDetectLaunchArgs(_installRoot);
+            AfterInstall(g);
+            SaveGames();
+            Progress.Value = 100;
+            TxtProgress.Text = "База v" + manifest.Version + " установлена" + (string.IsNullOrEmpty(manifest.Tag) ? "" : " (" + manifest.Tag + ")");
+            TxtStatus.Text = $"Игра «{g.Name}» установлена в {dest}";
+        }
+        catch (OperationCanceledException)
+        {
+            g.StatusText = "Отменено";
+            TxtProgress.Text = "Отменено";
+        }
+        catch (Exception ex)
+        {
+            g.Status = GameStatus.Error;
+            g.StatusText = "Ошибка: " + ex.Message;
+            MessageBox.Show($"Не удалось установить «{g.Name}»:\n{ex.Message}",
+                "Steam2 Лаунчер", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+        finally
+        {
+            g.IsBusy = false;
+            Progress.IsIndeterminate = false;
+            RefreshUpdateButton();
+        }
+    }
+
     private async Task UpdateAsync(GameItem g)
     {
         _cts = new CancellationTokenSource();
@@ -387,14 +491,18 @@ public partial class MainWindow : Window
 
             if (manifest.Base != g.BaseVersion)
             {
+                // New base: reinstall from GitHub parts (kind=base) is the clean way now.
                 var answer = MessageBox.Show(
                     $"Вышла новая БАЗА обновления (v{manifest.Base}) — текущая база v{g.BaseVersion}.\n\n" +
                     "Инкрементальное обновление поверх старой базы не подходит.\n" +
-                    "Перекачайте игру полностью по основной ссылке, затем обновитесь.\n\n" +
-                    "Открыть страницу загрузки игры?",
+                    "Лаунчер перекачает новую базу и затем применит обновления.",
                     "Steam2 Лаунчер", MessageBoxButton.YesNo, MessageBoxImage.Information);
-                if (answer == MessageBoxResult.Yes && !string.IsNullOrEmpty(g.Url))
-                    Process.Start(new ProcessStartInfo { FileName = g.Url, UseShellExecute = true });
+                if (answer == MessageBoxResult.Yes)
+                {
+                    await InstallBaseFromRepoAsync(g);
+                    if (g.InstalledVersion > 0)
+                        await UpdateAsync(g);
+                }
                 return;
             }
 
@@ -559,6 +667,12 @@ public partial class MainWindow : Window
         if (g.IsDownloading)
         {
             _cts?.Cancel();
+            return;
+        }
+        // Games with a Repo install the base straight from GitHub parts.
+        if (g.HasUpdates && !Directory.Exists(FullInstallPath(g)))
+        {
+            _ = InstallBaseFromRepoAsync(g);
             return;
         }
         _ = DownloadAsync(g);
