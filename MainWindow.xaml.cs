@@ -18,7 +18,23 @@ namespace Steam2Launcher;
 
 public partial class MainWindow : Window
 {
-    public const string CurrentVersion = "v1.5.0";
+    public static string CurrentVersion
+    {
+        get
+        {
+            try
+            {
+                var att = System.Attribute.GetCustomAttribute(
+                System.Reflection.Assembly.GetExecutingAssembly(),
+                typeof(System.Reflection.AssemblyInformationalVersionAttribute))
+                as System.Reflection.AssemblyInformationalVersionAttribute;
+                var ver = att?.InformationalVersion?.Split('+')[0];
+                if (string.IsNullOrWhiteSpace(ver)) ver = "1.0.0";
+                return "v" + ver;
+            }
+            catch { return "v1.0.0"; }
+        }
+    }
     public const string UpdateRepo = "MrPauk335/steam2launcher";
 
     private readonly Downloader _downloader = new();
