@@ -170,9 +170,10 @@ public partial class MainWindow : Window
         {
             HideMainBtnProgress();
             if (g == null) BtnMain.Content = "Выберите игру";
-            else if (!g.IsInstalled) BtnMain.Content = "Скачать";
-            else if (g.HasUpdates) BtnMain.Content = "Обновить";
-            else BtnMain.Content = "Играть";
+else if (!g.IsInstalled) BtnMain.Content = "Скачать";
+        else if (g.IsInstalled && (g.UpToDate || !g.HasUpdates)) BtnMain.Content = "Играть";
+        else if (g.HasPendingUpdate) BtnMain.Content = "Обновить";
+        else BtnMain.Content = "Играть";
         }
 
         BtnMain.IsEnabled = g != null && !busy;
@@ -338,6 +339,8 @@ public partial class MainWindow : Window
         if (g == null) return;
         if (!g.IsInstalled)
             BtnDownload_Click(sender, e);
+        else if (g.IsInstalled && g.UpToDate)
+            LaunchGame(g);
         else if (g.HasUpdates)
             BtnUpdate_Click(sender, e);
         else
@@ -717,10 +720,17 @@ del ""%~f0""
             var full = FullInstallPath(g);
             if (installed)
             {
-                var bi = BuildUpdater.ReadBuildInfo(full);
-                g.BaseVersion = bi.Base;
-                g.InstalledVersion = bi.Version;
-                if (g.HasUpdates) g.StatusText = $"v{bi.Version} ✓";
+                g.BaseVersion = s?.BaseVersion ?? 0;
+                g.InstalledVersion = s?.InstalledVersion ?? 0;
+                g.UpToDate = s?.UpToDate ?? false;
+                var biPath = Path.Combine(full, "buildinfo.json");
+                if (File.Exists(biPath))
+                {
+                    var bi = BuildUpdater.ReadBuildInfo(full);
+                    g.BaseVersion = bi.Base;
+                    g.InstalledVersion = bi.Version;
+                }
+                if (g.HasUpdates) g.StatusText = $"v{g.InstalledVersion} ✓";
             }
             if (installed && string.IsNullOrEmpty(g.ExePath))
             {
@@ -740,6 +750,49 @@ del ""%~f0""
         TxtStatus.Text = $"Игр: {_games.Count}  ·  файл: {Path.GetFileName(AppInfo.PostPath)}";
         TxtInstallRoot.Text = _installRoot;
         SaveGames();
+
+        // Check installed repo games against their latest release, so the button can
+        // become "Играть" when everything is already up to date.
+        foreach (var g in _games.Where(x => x.IsInstalled && x.HasUpdates))
+            _ = RefreshUpdateStatusAsync(g);
+    }
+
+    private async Task RefreshUpdateStatusAsync(GameItem g)
+    {
+        try
+        {
+            var (manifest, deltaUrl, tag, error) =
+                await BuildUpdater.FetchLatestAsync(g.Repo, CancellationToken.None);
+            bool upToDate;
+            if (manifest == null)
+            {
+                // Repo released nothing usable (no delta / base yet): nothing to download.
+                upToDate = true;
+            }
+            else if (manifest.Kind != "base"
+                && BuildUpdater.IsNewer(manifest, g.BaseVersion, g.InstalledVersion))
+            {
+                upToDate = false;
+            }
+            else if (manifest.Kind == "base" && manifest.Base <= g.BaseVersion)
+            {
+                upToDate = true;
+            }
+            else
+            {
+                upToDate = false;
+            }
+
+            Dispatcher.Invoke(() =>
+            {
+                g.UpToDate = upToDate;
+                if (upToDate && g.IsInstalled && g.HasUpdates)
+                    g.StatusText = $"v{g.InstalledVersion} ✓";
+                SaveGames();
+                RefreshUpdateButton();
+            });
+        }
+        catch { }
     }
 
     private bool GameInstalledLocally(string name, string manualInstallDir)
@@ -789,7 +842,8 @@ del ""%~f0""
             ExePath = g.ExePath,
             Repo = g.Repo,
             BaseVersion = g.BaseVersion,
-            InstalledVersion = g.InstalledVersion
+            InstalledVersion = g.InstalledVersion,
+            UpToDate = g.UpToDate
         }).ToList();
         Storage.Save(saved);
         SaveSettings();
@@ -1029,6 +1083,9 @@ del ""%~f0""
             {
                 g.StatusText = g.HasUpdates ? $"v{g.InstalledVersion} ✓ актуально" : "Скачано ✓";
                 TxtProgress.Text = "Установлена последняя версия";
+                g.UpToDate = true;
+                SaveGames();
+                RefreshUpdateButton();
                 return;
             }
 
@@ -1087,6 +1144,7 @@ del ""%~f0""
             try { BuildUpdater.WriteFileManifest(installDir); } catch { }
             g.BaseVersion = manifest.Base;
             g.InstalledVersion = manifest.Version;
+            g.UpToDate = true;
             g.StatusText = $"v{manifest.Version} ✓";
             SaveGames();
             Progress.Value = 100;

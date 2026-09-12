@@ -20,6 +20,7 @@ public class GameItem : INotifyPropertyChanged
     private GameStatus _status;
     private bool _isBusy;
     private bool _isInstalled;
+    private bool _upToDate = true;
 
     public GameItem(string name, string url, string installDir, string exePath, bool installed) :
         this(name, "", url, installDir, exePath, installed) { }
@@ -47,7 +48,11 @@ public class GameItem : INotifyPropertyChanged
     public string Repo { get => _repo; set { _repo = value; OnProp(); } }
     public int BaseVersion { get => _baseVersion; set { _baseVersion = value; OnProp(); } }
     public int InstalledVersion { get => _installedVersion; set { _installedVersion = value; OnProp(); } }
+    /// <summary>True when the game has a build repo configured (base + delta updates).</summary>
     public bool HasUpdates => !string.IsNullOrWhiteSpace(_repo);
+
+    /// <summary>True when the game has a build repo configured (base + delta updates).</summary>
+    public bool HasPendingUpdate => HasUpdates && !_upToDate && _isInstalled;
 
     public string InstallDir
     {
@@ -80,6 +85,16 @@ public class GameItem : INotifyPropertyChanged
     }
 
     public bool IsDownloading => _isBusy;
+
+    /// <summary>
+    /// True when the installed build matches the latest published build (no update
+    /// pending). The "Играть" action button relies on this instead of the raw repo flag.
+    /// </summary>
+    public bool UpToDate
+    {
+        get => _upToDate;
+        set { _upToDate = value; OnProp(); OnProp(nameof(HasUpdates)); }
+    }
 
     public string StatusText
     {

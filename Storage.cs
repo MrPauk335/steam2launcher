@@ -77,4 +77,7 @@ public class SavedEntry
 
     /// <summary>Version of the installed build (from the embedded buildinfo.json / last applied delta).</summary>
     public int InstalledVersion { get; set; }
+
+    /// <summary>True when the last update check confirmed the installed build is current.</summary>
+    public bool UpToDate { get; set; }
 }
