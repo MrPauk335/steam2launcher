@@ -10,7 +10,7 @@ namespace Steam2Launcher;
 
 public partial class MainWindow : Window
 {
-    public const string CurrentVersion = "v1.2.0";
+    public const string CurrentVersion = "v1.3.0";
     public const string UpdateRepo = "MrPauk335/steam2launcher";
 
     private readonly Downloader _downloader = new();
@@ -210,8 +210,18 @@ public partial class MainWindow : Window
             var g = new GameItem(e.Name, e.Description, e.Url, installDir, s?.ExePath ?? "", installed)
             {
                 DirectUrl = string.IsNullOrWhiteSpace(s?.DirectUrl) ? e.DirectUrl : s.DirectUrl,
-                LaunchArgs = string.IsNullOrWhiteSpace(s?.LaunchArgs) ? e.LaunchArgs : s.LaunchArgs
+                LaunchArgs = string.IsNullOrWhiteSpace(s?.LaunchArgs) ? e.LaunchArgs : s.LaunchArgs,
+                Repo = string.IsNullOrWhiteSpace(s?.Repo) ? e.Repo : s.Repo
             };
+            var full = FullInstallPath(g);
+            if (installed)
+            {
+                var bi = BuildUpdater.ReadBuildInfo(full);
+                g.BaseVersion = bi.Base;
+                g.InstalledVersion = bi.Version;
+                if (g.HasUpdates)
+                    g.StatusText = $"v{bi.Version} ✓";
+            }
             if (installed && string.IsNullOrEmpty(g.ExePath))
             {
                 // Server-recommended exe (relative to install dir) if it exists, else auto-detect
@@ -278,7 +288,10 @@ public partial class MainWindow : Window
             DirectUrl = g.DirectUrl,
             LaunchArgs = g.LaunchArgs,
             InstallDir = g.InstallDir,
-            ExePath = g.ExePath
+            ExePath = g.ExePath,
+            Repo = g.Repo,
+            BaseVersion = g.BaseVersion,
+            InstalledVersion = g.InstalledVersion
         }).ToList();
         Storage.Save(saved);
         SaveSettings();
@@ -313,6 +326,140 @@ public partial class MainWindow : Window
     }
 
     private GameItem? Selected => GamesGrid.SelectedItem as GameItem;
+
+    // ---------- Инкрементальные обновления (delta-патчи с GitHub) ----------
+
+    private void RefreshUpdateButton()
+    {
+        var g = Selected;
+        BtnUpdate.IsEnabled = g != null && g.HasUpdates && g.IsInstalled && !g.IsDownloading;
+    }
+
+    private void GamesGrid_SelectionChanged(object sender, System.Windows.Controls.SelectionChangedEventArgs e)
+        => RefreshUpdateButton();
+
+    private void BtnUpdate_Click(object sender, RoutedEventArgs e)
+    {
+        var g = Selected;
+        if (g == null) return;
+        if (g.IsDownloading)
+        {
+            _cts?.Cancel();
+            return;
+        }
+        _ = UpdateAsync(g);
+    }
+
+    private async Task UpdateAsync(GameItem g)
+    {
+        _cts = new CancellationTokenSource();
+        var ct = _cts.Token;
+        g.IsBusy = true;
+        g.StatusText = "Проверка обновлений…";
+        Progress.IsIndeterminate = true;
+        TxtProgress.Text = "Запрос к GitHub…";
+
+        try
+        {
+            var installDir = FullInstallPath(g);
+            if (!Directory.Exists(installDir))
+            {
+                MessageBox.Show("Игра не установлена. Сначала скачайте её.",
+                    "Steam2 Лаунчер", MessageBoxButton.OK, MessageBoxImage.Warning);
+                return;
+            }
+
+            var (manifest, deltaUrl, tag, error) = await BuildUpdater.FetchLatestAsync(g.Repo, ct);
+            if (manifest == null)
+            {
+                if (!string.IsNullOrEmpty(error))
+                    MessageBox.Show("Не удалось проверить обновления:\n" + error,
+                        "Steam2 Лаунчер", MessageBoxButton.OK, MessageBoxImage.Warning);
+                return;
+            }
+
+            if (!BuildUpdater.IsNewer(manifest, g.BaseVersion, g.InstalledVersion))
+            {
+                g.StatusText = g.HasUpdates ? $"v{g.InstalledVersion} ✓ актуально" : "Скачано ✓";
+                TxtProgress.Text = "Установлена последняя версия";
+                return;
+            }
+
+            if (manifest.Base != g.BaseVersion)
+            {
+                var answer = MessageBox.Show(
+                    $"Вышла новая БАЗА обновления (v{manifest.Base}) — текущая база v{g.BaseVersion}.\n\n" +
+                    "Инкрементальное обновление поверх старой базы не подходит.\n" +
+                    "Перекачайте игру полностью по основной ссылке, затем обновитесь.\n\n" +
+                    "Открыть страницу загрузки игры?",
+                    "Steam2 Лаунчер", MessageBoxButton.YesNo, MessageBoxImage.Information);
+                if (answer == MessageBoxResult.Yes && !string.IsNullOrEmpty(g.Url))
+                    Process.Start(new ProcessStartInfo { FileName = g.Url, UseShellExecute = true });
+                return;
+            }
+
+            // Download delta zip
+            var deltaName = Downloader.FileNameFromUrl(deltaUrl ?? "");
+            if (string.IsNullOrEmpty(deltaName)) deltaName = "update.zip";
+            var downloadPath = Path.Combine(Path.GetTempPath(), "steam2upd_" + Guid.NewGuid().ToString("N")[..8]
+                + "_" + GameEntry.Sanitize(deltaName));
+            g.StatusText = $"Скачивание обновления v{manifest.Version}…";
+
+            var progress = new Progress<DownloadProgress>(p =>
+            {
+                Progress.IsIndeterminate = false;
+                Progress.Value = p.Percent;
+                TxtProgress.Text = "Обновление: " + p.Message;
+            });
+            var result = await _downloader.DownloadAsync(deltaUrl ?? "", downloadPath, progress, ct, PromptCredentials);
+            if (!result.Success)
+                throw new Exception("Ошибка загрузки обновления: " + result.Error);
+
+            // Extract over the install dir (overwrites changed files)
+            if (ArchiveExtractor.IsArchive(downloadPath, result.ContentType))
+            {
+                var exProgress = new Progress<string>(msg =>
+                {
+                    g.StatusText = msg;
+                    Progress.IsIndeterminate = true;
+                    TxtProgress.Text = msg;
+                });
+                await ArchiveExtractor.ExtractAsync(downloadPath, installDir, exProgress, ct);
+            }
+            else
+            {
+                File.Move(downloadPath, Path.Combine(installDir, Path.GetFileName(downloadPath)), true);
+            }
+
+            // Delete removed files + stamp new buildinfo
+            BuildUpdater.ApplyRemoved(installDir, manifest.Removed);
+            BuildUpdater.WriteBuildInfo(installDir, manifest.Base, manifest.Version);
+            g.BaseVersion = manifest.Base;
+            g.InstalledVersion = manifest.Version;
+            g.StatusText = $"v{manifest.Version} ✓";
+            SaveGames();
+            Progress.Value = 100;
+            TxtProgress.Text = $"Обновлено до v{manifest.Version}" + (string.IsNullOrEmpty(tag) ? "" : $" ({tag})");
+        }
+        catch (OperationCanceledException)
+        {
+            g.StatusText = "Отменено";
+            TxtProgress.Text = "Отменено";
+        }
+        catch (Exception ex)
+        {
+            g.Status = GameStatus.Error;
+            g.StatusText = "Ошибка: " + ex.Message;
+            MessageBox.Show($"Не удалось обновить «{g.Name}»:\n{ex.Message}",
+                "Steam2 Лаунчер", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+        finally
+        {
+            g.IsBusy = false;
+            Progress.IsIndeterminate = false;
+            RefreshUpdateButton();
+        }
+    }
 
     // ---------- Авто-установка SmartSteamEmu ----------
 
@@ -477,6 +624,14 @@ public partial class MainWindow : Window
             g.AutoFindExe(_installRoot);
             if (string.IsNullOrEmpty(g.LaunchArgs)) g.AutoDetectLaunchArgs(_installRoot);
             AfterInstall(g);
+            if (g.HasUpdates)
+            {
+                // Fresh base archive is version 1; deltas from the update repo bump it later.
+                BuildUpdater.WriteBuildInfo(dest, 1, 1);
+                g.BaseVersion = 1;
+                g.InstalledVersion = 1;
+                g.StatusText = "v1 ✓";
+            }
             SaveGames();
             TxtStatus.Text = $"Игра «{g.Name}» установлена в {dest}";
             Progress.Value = 100;
@@ -509,6 +664,7 @@ public partial class MainWindow : Window
         {
             g.IsBusy = false;
             Progress.IsIndeterminate = false;
+            RefreshUpdateButton();
         }
     }
 

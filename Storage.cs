@@ -68,4 +68,13 @@ public class SavedEntry
     public string LaunchArgs { get; set; } = "";
     public string InstallDir { get; set; } = "";
     public string ExePath { get; set; } = "";
+
+    /// <summary>Per-build update repo (owner/repo) for delta releases, e.g. "MrPauk335/fstop-builds".</summary>
+    public string Repo { get; set; } = "";
+
+    /// <summary>Base archive version the installed build was derived from.</summary>
+    public int BaseVersion { get; set; }
+
+    /// <summary>Version of the installed build (from the embedded buildinfo.json / last applied delta).</summary>
+    public int InstalledVersion { get; set; }
 }

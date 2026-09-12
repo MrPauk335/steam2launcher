@@ -46,6 +46,7 @@ public static class PostParser
                 DirectUrl = (e.DirectUrl ?? "").Trim(),
                 Exe = (e.Exe ?? "").Trim(),
                 LaunchArgs = (e.LaunchArgs ?? "").Trim(),
+                Repo = (e.Repo ?? "").Trim(),
                 Url = e.Url.Trim(),
                 Status = GameStatus.NotDownloaded
             });

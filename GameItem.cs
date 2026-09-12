@@ -11,6 +11,9 @@ public class GameItem : INotifyPropertyChanged
     private string _url;
     private string _directUrl;
     private string _launchArgs;
+    private string _repo;
+    private int _baseVersion;
+    private int _installedVersion;
     private string _installDir;
     private string _exePath;
     private string _statusText;
@@ -28,6 +31,7 @@ public class GameItem : INotifyPropertyChanged
         _url = url;
         _directUrl = "";
         _launchArgs = "";
+        _repo = "";
         _installDir = installDir;
         _exePath = exePath;
         _isInstalled = installed;
@@ -40,6 +44,10 @@ public class GameItem : INotifyPropertyChanged
     public string Url { get => _url; set { _url = value; OnProp(); } }
     public string DirectUrl { get => _directUrl; set { _directUrl = value; OnProp(); } }
     public string LaunchArgs { get => _launchArgs; set { _launchArgs = value; OnProp(); } }
+    public string Repo { get => _repo; set { _repo = value; OnProp(); } }
+    public int BaseVersion { get => _baseVersion; set { _baseVersion = value; OnProp(); } }
+    public int InstalledVersion { get => _installedVersion; set { _installedVersion = value; OnProp(); } }
+    public bool HasUpdates => !string.IsNullOrWhiteSpace(_repo);
 
     public string InstallDir
     {

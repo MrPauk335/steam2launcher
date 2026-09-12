@@ -41,7 +41,7 @@
                        FontSize="13" VerticalAlignment="Center"/>
             <Button x:Name="BtnTheme" Content="Тема: Тёмная" DockPanel.Dock="Right"
                     Width="150" Height="30" Margin="8,0,0,0" Click="BtnTheme_Click"/>
-            <Button x:Name="BtnRescan" Content="Обновить" DockPanel.Dock="Right"
+            <Button x:Name="BtnRescan" Content="Перечитать" DockPanel.Dock="Right"
                     Width="90" Height="30" Margin="0,0,8,0" Click="BtnRescan_Click"/>
         </DockPanel>
         <TextBlock Grid.Row="1" x:Name="TxtUpdate" Visibility="Collapsed"
@@ -65,7 +65,8 @@
                   FontSize="13"
                   ColumnHeaderHeight="34"
                   GridLinesVisibility="Horizontal"
-                  MouseDoubleClick="GamesGrid_MouseDoubleClick">
+                  MouseDoubleClick="GamesGrid_MouseDoubleClick"
+                  SelectionChanged="GamesGrid_SelectionChanged">
             <DataGrid.Resources>
                 <Style TargetType="DataGridColumnHeader">
                     <Setter Property="Background" Value="{DynamicResource PanelBrush}"/>
@@ -96,6 +97,8 @@
                     Width="90" Height="34" Margin="8,0,0,0" Click="BtnEdit_Click"/>
             <Button x:Name="BtnLaunch" Content="Запустить" DockPanel.Dock="Right"
                     Width="90" Height="34" Margin="8,0,0,0" Click="BtnLaunch_Click"/>
+            <Button x:Name="BtnUpdate" Content="Обновить" DockPanel.Dock="Right"
+                    Width="90" Height="34" Margin="8,0,0,0" Click="BtnUpdate_Click" IsEnabled="False"/>
             <Button x:Name="BtnDownload" Content="Скачать" DockPanel.Dock="Right"
                     Width="90" Height="34" Margin="8,0,0,0" Click="BtnDownload_Click"/>
             <TextBlock DockPanel.Dock="Left" Text="Папка:" VerticalAlignment="Center"

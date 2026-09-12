@@ -18,6 +18,8 @@ public class GameEntry
     public string DirectUrl { get; set; } = "";
     public string Exe { get; set; } = "";
     public string LaunchArgs { get; set; } = "";
+    /// <summary>Optional GitHub repo (owner/repo) that hosts delta releases + manifest.json for this game.</summary>
+    public string Repo { get; set; } = "";
     public string InstallDir { get; set; } = "";
     public string ExePath { get; set; } = "";
     public GameStatus Status { get; set; } = GameStatus.NotDownloaded;
