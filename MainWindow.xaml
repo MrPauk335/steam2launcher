@@ -276,11 +276,26 @@
                     <Separator Grid.Row="2" Margin="16,8,16,0"
                                Background="{DynamicResource BorderBrush}"/>
 
-                    <!-- Primary action button -->
-                    <Button x:Name="BtnMain" Grid.Row="3" Content="Скачать"
-                            Style="{StaticResource PlayBtn}"
-                            Height="44" Margin="16,10,16,0"
-                            Click="BtnMain_Click"/>
+                    <!-- Primary action button / install progress -->
+                    <Grid Grid.Row="3" Margin="16,10,16,0" Height="44">
+                        <Button x:Name="BtnMain" Content="Скачать"
+                                Style="{StaticResource PlayBtn}"
+                                Height="44" Click="BtnMain_Click"/>
+                        <Border x:Name="BtnMainProgressWrap" Visibility="Collapsed"
+                                CornerRadius="6" ClipToBounds="True"
+                                Background="#FF101410">
+                            <Grid>
+                                <ProgressBar x:Name="BtnMainProgress" Minimum="0" Maximum="100" Value="0"
+                                             Height="44" BorderThickness="0"
+                                             Foreground="{DynamicResource PlayBrush}"
+                                             Background="Transparent"/>
+                                <TextBlock x:Name="BtnMainProgressText" Text="0%"
+                                           HorizontalAlignment="Center" VerticalAlignment="Center"
+                                           Foreground="White" FontWeight="Bold" FontSize="12.5"
+                                           TextTrimming="CharacterEllipsis"/>
+                            </Grid>
+                        </Border>
+                    </Grid>
 
                     <!-- Secondary buttons row -->
                     <WrapPanel Grid.Row="4" Margin="16,10,16,0" HorizontalAlignment="Left">

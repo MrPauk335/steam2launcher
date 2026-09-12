@@ -146,13 +146,20 @@ public partial class MainWindow : Window
         var g = Selected;
         var busy = g != null && g.IsDownloading;
 
-        BtnMain.IsEnabled = g != null && !busy;
-        if (g == null) BtnMain.Content = "Выберите игру";
-        else if (busy) BtnMain.Content = "Загрузка…";
-        else if (!g.IsInstalled) BtnMain.Content = "Скачать";
-        else if (g.HasUpdates) BtnMain.Content = "Обновить";
-        else BtnMain.Content = "Играть";
+        if (busy && g != null)
+        {
+            ShowMainBtnProgress(0, true, g.StatusText);
+        }
+        else
+        {
+            HideMainBtnProgress();
+            if (g == null) BtnMain.Content = "Выберите игру";
+            else if (!g.IsInstalled) BtnMain.Content = "Скачать";
+            else if (g.HasUpdates) BtnMain.Content = "Обновить";
+            else BtnMain.Content = "Играть";
+        }
 
+        BtnMain.IsEnabled = g != null && !busy;
         BtnVerify.IsEnabled = g != null && !busy && g.IsInstalled;
         BtnUninstall.IsEnabled = g != null && !busy && g.IsInstalled;
         BtnOpenFolder.IsEnabled = g != null && !busy && g.IsInstalled;
@@ -164,6 +171,30 @@ public partial class MainWindow : Window
             BtnPause.Content = _pause?.IsPaused == true ? "▶ Продолжить" : "⏸ Пауза";
         else
             BtnPause.Content = "⏸ Пауза";
+    }
+
+    // Show the install progress bar in place of the big action button (Steam-style).
+    private void ShowMainBtnProgress(double pct, bool indeterminate, string text)
+    {
+        BtnMain.Visibility = Visibility.Collapsed;
+        BtnMainProgressWrap.Visibility = Visibility.Visible;
+        BtnMainProgress.IsIndeterminate = indeterminate;
+        if (!indeterminate) BtnMainProgress.Value = Math.Max(0, Math.Min(100, pct));
+        BtnMainProgressText.Text = text;
+    }
+
+    private void HideMainBtnProgress()
+    {
+        BtnMainProgressWrap.Visibility = Visibility.Collapsed;
+        BtnMain.Visibility = Visibility.Visible;
+    }
+
+    private static string FormatEtaShort(TimeSpan? eta)
+    {
+        if (eta == null) return "";
+        if (eta.Value.TotalHours >= 1) return $" · осталось {eta.Value.Hours}ч {eta.Value.Minutes}мин";
+        if (eta.Value.TotalMinutes >= 1) return $" · осталось {eta.Value.Minutes}мин";
+        return $" · осталось {eta.Value.Seconds}сек";
     }
 
     // ═══════════════════════════ Tile right-click selection ═══════════════════════════
@@ -866,6 +897,8 @@ del ""%~f0""
                     Progress.IsIndeterminate = false;
                     Progress.Visibility = Visibility.Visible;
                     Progress.Value = Math.Min(pct, 100);
+                    var mainTxt = $"{FormatPercent(pct)} · {speed / 1048576.0:0.0} МБ/с" + FormatEtaShort(eta);
+                    ShowMainBtnProgress(Math.Min(pct, 100), false, mainTxt);
                     TxtProgress.Text = $"Часть {capturedIdx + 1}/{partUrls.Count}" +
                         $"  {FormatBytes(overallBytes)}{(hasTotal ? " / " + FormatBytes(totalBytes) : "")}" +
                         $"  {FormatPercent(pct)}" +
@@ -883,6 +916,7 @@ del ""%~f0""
 
             g.StatusText = "Распаковка…";
             Progress.IsIndeterminate = true;
+            ShowMainBtnProgress(0, true, "Распаковка…");
 
             for (int i = 0; i < localParts.Count; i++)
             {
@@ -891,6 +925,7 @@ del ""%~f0""
 
                 var partPath = localParts[i];
                 TxtProgress.Text = $"Распаковка: часть {i + 1}/{localParts.Count} ({Path.GetFileName(partPath)})";
+                ShowMainBtnProgress(0, true, $"Распаковка: {i + 1}/{localParts.Count}");
 
                 var exProgress = new Progress<string>(msg =>
                 {
@@ -1006,6 +1041,8 @@ del ""%~f0""
                 Progress.IsIndeterminate = false;
                 Progress.Visibility = Visibility.Visible;
                 Progress.Value = p.Percent;
+                ShowMainBtnProgress(p.Percent, false,
+                    $"{FormatPercent(p.Percent)} · {p.SpeedBytesPerSec / 1048576.0:0.0} МБ/с" + FormatEtaShort(p.Eta));
                 TxtProgress.Text = $"Обновление: {p.Message}";
             });
             var result = await _downloader.DownloadAsync(deltaUrl ?? "", downloadPath, progress, ct, PromptCredentials, _pause);
@@ -1015,6 +1052,7 @@ del ""%~f0""
             if (ArchiveExtractor.IsArchive(downloadPath, result.ContentType))
             {
                 g.StatusText = "Распаковка обновления…";
+                ShowMainBtnProgress(0, true, "Распаковка…");
                 var exProgress = new Progress<string>(msg =>
                 {
                     g.StatusText = msg;
@@ -1207,6 +1245,8 @@ del ""%~f0""
                 Progress.IsIndeterminate = false;
                 Progress.Visibility = Visibility.Visible;
                 Progress.Value = p.Percent;
+                ShowMainBtnProgress(p.Percent, false,
+                    $"{FormatPercent(p.Percent)} · {p.SpeedBytesPerSec / 1048576.0:0.0} МБ/с" + FormatEtaShort(p.Eta));
                 TxtProgress.Text = p.Message;
             });
 
@@ -1219,6 +1259,7 @@ del ""%~f0""
 
             if (ArchiveExtractor.IsArchive(downloadPath, result.ContentType))
             {
+                ShowMainBtnProgress(0, true, "Распаковка…");
                 var exProgress = new Progress<string>(msg =>
                 {
                     g.StatusText = msg;

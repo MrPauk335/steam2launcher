@@ -435,6 +435,7 @@ public class Downloader
 
             var sw = Stopwatch.StartNew();
             long smoothBytes = read;
+            double smoothSpeed = 0;
 
             while ((n = await stream.ReadAsync(buffer, ct)) > 0)
             {
@@ -445,22 +446,27 @@ public class Downloader
 
                 if (reportCounter % 20 == 0)
                 {
+                    // Measure speed over THIS interval only (reset per report), then EMA-smooth
+                    // to exclude stalls, so the ETA is meaningful.
                     var elapsed = sw.Elapsed.TotalSeconds;
-                    var speed = elapsed > 0 ? (read - smoothBytes) / elapsed : 0;
+                    sw.Restart();
+                    var deltaBytes = read - smoothBytes;
                     smoothBytes = read;
+                    var instSpeed = elapsed > 0 ? deltaBytes / elapsed : 0;
+                    smoothSpeed = smoothSpeed <= 0 ? instSpeed : smoothSpeed * 0.6 + instSpeed * 0.4;
 
                     var bytesRemaining = actualTotal.HasValue ? actualTotal.Value - read : 0;
-                    TimeSpan? eta = speed > 1024 && bytesRemaining > 0
-                        ? TimeSpan.FromSeconds(bytesRemaining / speed) : null;
+                    TimeSpan? eta = smoothSpeed > 1024 && bytesRemaining > 0
+                        ? TimeSpan.FromSeconds(bytesRemaining / smoothSpeed) : null;
 
                     progress?.Report(new DownloadProgress
                     {
                         DownloadedBytes = read,
                         TotalBytes = actualTotal,
-                        SpeedBytesPerSec = speed,
+                        SpeedBytesPerSec = smoothSpeed,
                         Eta = eta,
                         Message = FormatBytes(read) + " / " + FormatBytes(actualTotal ?? 0) +
-                                  (speed > 0 ? $"  {speed / 1048576.0:0.0} МБ/с" : "") +
+                                  (smoothSpeed > 0 ? $"  {smoothSpeed / 1048576.0:0.0} МБ/с" : "") +
                                   (eta != null ? $"  осталось {FormatEta(eta.Value)}" : "")
                     });
                 }
