@@ -114,6 +114,16 @@ public class Downloader
     {
         url = url.Trim();
 
+        if (url.EndsWith(".zip", StringComparison.OrdinalIgnoreCase) ||
+            url.EndsWith(".rar", StringComparison.OrdinalIgnoreCase) ||
+            url.EndsWith(".7z", StringComparison.OrdinalIgnoreCase) ||
+            url.EndsWith(".tar.gz", StringComparison.OrdinalIgnoreCase) ||
+            url.EndsWith(".exe", StringComparison.OrdinalIgnoreCase) ||
+            url.EndsWith(".reg", StringComparison.OrdinalIgnoreCase))
+        {
+            return (url, FileNameFromUrl(url));
+        }
+
         if (url.Contains("gofile.io", StringComparison.OrdinalIgnoreCase))
             return await ResolveGofile(url, ct);
 
@@ -231,6 +241,14 @@ public class Downloader
 
     private async Task<(string, string)> ResolveMediafire(string pageUrl, CancellationToken ct)
     {
+        if (Regex.IsMatch(pageUrl, @"^https?://download[^/]*\.mediafire\.com/", RegexOptions.IgnoreCase) ||
+            pageUrl.EndsWith(".zip", StringComparison.OrdinalIgnoreCase) ||
+            pageUrl.EndsWith(".rar", StringComparison.OrdinalIgnoreCase) ||
+            pageUrl.EndsWith(".7z", StringComparison.OrdinalIgnoreCase))
+        {
+            return (pageUrl, FileNameFromUrl(pageUrl));
+        }
+
         var html = await _http.GetStringAsync(pageUrl, ct);
         var m = Regex.Match(html, @"https?://download[^""' ]+\.mediafire\.com/[^""' ]+");
         if (!m.Success) m = Regex.Match(html, @"href=""(https?://download[^""]+)""");

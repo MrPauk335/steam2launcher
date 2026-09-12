@@ -320,7 +320,7 @@ else if (!g.IsInstalled) BtnMain.Content = "Скачать";
         {
             Title = "Выберите исполняемый файл игры (.exe или .bat)",
             InitialDirectory = Directory.Exists(dest) ? dest : AppInfo.BaseDir,
-            Filter = "Исполняемые файлы (*.exe;*.bat;*.cmd)|*.exe;*.bat;*.cmd|Все файлы (*.*)|*.*"
+            Filter = "Исполняемые файлы (*.exe;*.bat;*.cmd;*.reg)|*.exe;*.bat;*.cmd;*.reg|Все файлы (*.*)|*.*"
         };
         if (dlg.ShowDialog() == System.Windows.Forms.DialogResult.OK)
         {
@@ -708,21 +708,23 @@ del ""%~f0""
         _games.Clear();
         foreach (var e in entries)
         {
-            var s = saved.FirstOrDefault(x => x.Url == e.Url);
+            var s = saved.FirstOrDefault(x => x.Url == e.Url)
+                ?? saved.FirstOrDefault(x => !string.IsNullOrWhiteSpace(e.Name) && string.Equals(x.Name, e.Name, StringComparison.OrdinalIgnoreCase));
             var installDir = s?.InstallDir ?? "";
             var installed = GameInstalledLocally(e.Name, installDir);
             var g = new GameItem(e.Name, e.Description, e.Url, installDir, s?.ExePath ?? "", installed)
             {
                 DirectUrl = string.IsNullOrWhiteSpace(s?.DirectUrl) ? e.DirectUrl : s.DirectUrl,
                 LaunchArgs = string.IsNullOrWhiteSpace(s?.LaunchArgs) ? e.LaunchArgs : s.LaunchArgs,
-                Repo = string.IsNullOrWhiteSpace(s?.Repo) ? e.Repo : s.Repo
+                Repo = string.IsNullOrWhiteSpace(s?.Repo) ? e.Repo : s.Repo,
+                SuggestedExe = e.Exe
             };
             var full = FullInstallPath(g);
             if (installed)
             {
                 g.BaseVersion = s?.BaseVersion ?? 0;
                 g.InstalledVersion = s?.InstalledVersion ?? 0;
-                g.UpToDate = s?.UpToDate ?? false;
+                g.UpToDate = s?.UpToDate ?? true;
                 var biPath = Path.Combine(full, "buildinfo.json");
                 if (File.Exists(biPath))
                 {

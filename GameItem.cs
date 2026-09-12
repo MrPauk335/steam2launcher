@@ -21,6 +21,8 @@ public class GameItem : INotifyPropertyChanged
     private bool _isBusy;
     private bool _isInstalled;
     private bool _upToDate = true;
+    private string _suggestedExe = "";
+    public string SuggestedExe { get => _suggestedExe; set { _suggestedExe = value; OnProp(); } }
 
     public GameItem(string name, string url, string installDir, string exePath, bool installed) :
         this(name, "", url, installDir, exePath, installed) { }
@@ -131,6 +133,26 @@ public class GameItem : INotifyPropertyChanged
         var full = FullInstallPath(installRoot);
         if (!Directory.Exists(full)) return;
 
+        if (!string.IsNullOrWhiteSpace(SuggestedExe))
+        {
+            var direct = Path.Combine(full, SuggestedExe);
+            if (File.Exists(direct))
+            {
+                var relDirect = Path.GetRelativePath(installRoot, direct);
+                ExePath = relDirect.StartsWith("..") ? direct : relDirect;
+                return;
+            }
+            foreach (var f in Directory.EnumerateFiles(full, "*", SearchOption.AllDirectories))
+            {
+                if (string.Equals(Path.GetFileName(f), SuggestedExe, StringComparison.OrdinalIgnoreCase))
+                {
+                    var relF = Path.GetRelativePath(installRoot, f);
+                    ExePath = relF.StartsWith("..") ? f : relF;
+                    return;
+                }
+            }
+        }
+
         var preferred = new[] { "portal2", "portal", "hl2", "garrysmod", "left4dead2",
             "life.exe", "siege.exe", "run" };
 
@@ -138,7 +160,7 @@ public class GameItem : INotifyPropertyChanged
         foreach (var f in Directory.EnumerateFiles(full, "*", SearchOption.AllDirectories))
         {
             var ext = Path.GetExtension(f).ToLowerInvariant();
-            if (ext != ".exe" && ext != ".bat" && ext != ".cmd") continue;
+            if (ext != ".exe" && ext != ".bat" && ext != ".cmd" && ext != ".reg") continue;
             var rel = Path.GetRelativePath(full, f);
             var depth = rel.Count(c => c == '\\' || c == '/');
             if (depth > 5) continue;
