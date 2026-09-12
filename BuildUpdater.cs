@@ -2,22 +2,34 @@ using System.IO;
 using System.Net;
 using System.Net.Http;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 
 namespace Steam2Launcher;
 
 /// <summary>GitHub release manifest for incremental game updates (delta patches).</summary>
 public class BuildManifest
 {
+    [JsonPropertyName("kind")]
     public string Kind { get; set; } = "delta";
+    [JsonPropertyName("name")]
     public string Name { get; set; } = "";
+    [JsonPropertyName("base")]
     public int Base { get; set; }
+    [JsonPropertyName("version")]
     public int Version { get; set; }
+    [JsonPropertyName("delta")]
     public string Delta { get; set; } = "";
+    [JsonPropertyName("removed")]
     public List<string> Removed { get; set; } = new();
 
     /// <summary>Part file names for base releases (kind = "base"), in order.</summary>
+    [JsonPropertyName("parts")]
     public List<string> Parts { get; set; } = new();
 
+    [JsonPropertyName("published")]
+    public string Published { get; set; } = "";
+
+    [JsonIgnore]
     public string Tag { get; set; } = "";
 }
 
